@@ -1,0 +1,29 @@
+# 后端
+
+Python 3.11，FastAPI 单 API 进程＋独立 worker，SQLite WAL。时区为北京时间，持久数据时间统一为 UTC 毫秒。接口基线见 [后端设计](../docs/04-后端详细设计与接口契约.md)，验收进展见 [逐项清单](../docs/05-后端实现与验收清单.md)。
+
+在 `backend` 目录安装、运行：
+
+```powershell
+python -m venv ../.venv
+../.venv/Scripts/python -m pip install -e '.[dev]'
+../.venv/Scripts/python -m app.cli export-openapi
+../.venv/Scripts/python -m pytest
+```
+
+Linux 部署使用 Python 虚拟环境。配置 `CAW_DATA_DIR`、`CAW_DATABASE_URL`、`CAW_MASTER_KEY_FILE`、`CAW_ALLOWED_ORIGIN`、`CAW_RTSP_ALLOWED_PORTS`、`CAW_PROVIDER_ALLOWED_HOSTS`；域名与端口由部署人员填写，主密钥必须放在仓库外。
+
+```sh
+python -m app.cli init-key --path /etc/camera-ai-workbench/master.key
+python -m app.cli migrate
+python -m app.cli create-admin
+python -m app.cli check-config
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+python -m app.worker_main
+```
+
+登录接口要求 `Origin` 与 `CAW_ALLOWED_ORIGIN` 完全一致。登录后的 `csrf_token` 用于所有写请求；浏览器使用安全、HttpOnly、SameSite=Strict 的会话 Cookie。完整 OpenAPI 也需要登录。CLI 导出不需要运行服务或读取主密钥。
+
+AI 地址需要部署白名单，默认 HTTPS。确有本机兼容服务时用 `CAW_PROVIDER_LOCAL_ENDPOINTS=主机:端口` 单独允许。网络连接验证解析后的地址并直接连接已验证的 IP，保留原始 TLS SNI，不跟随重定向，不读取系统代理。RTSP 只允许本机明确端口。前端不能更改这些部署边界。
+
+参考图片会重新解码、应用 EXIF 方向、去除元数据、保存独立 JPEG。数据库备份用 `python -m app.cli backup --destination <新快照文件>`；现场图不备份，主密钥与参考图独立受保护保存。恢复应先停止两个进程，再执行迁移、资产扫描与清理，确认 TTL 后开放 API；不要直接复制运行中的 SQLite 文件。
