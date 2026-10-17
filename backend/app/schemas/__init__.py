@@ -130,6 +130,12 @@ class SourcePatch(Strict):
     password: Annotated[str, Field(min_length=1, max_length=256)] | None = None
     credential_action: Literal["keep", "clear"] = "keep"
 
+    @model_validator(mode="after")
+    def non_null(self):
+        if any(getattr(self, field) is None for field in self.model_fields_set - {"password"}):
+            raise ValueError("源配置字段不能为 null")
+        return self
+
     @field_validator("path")
     @classmethod
     def path_only(cls, value):
@@ -193,6 +199,15 @@ class CameraPatch(Strict):
     retention_minutes: Annotated[int, Field(ge=1, le=10080)] | None = None
     regions: Regions | None = None
     preview_token: str | None = None
+
+    @model_validator(mode="after")
+    def non_null(self):
+        if any(
+            getattr(self, field) is None
+            for field in self.model_fields_set - {"retention_minutes", "preview_token"}
+        ):
+            raise ValueError("除保留期继承外，修改字段不能为 null")
+        return self
 
 
 class CameraPreview(Strict):
@@ -289,10 +304,22 @@ class EntityPatch(Strict):
     enabled: bool | None = None
     is_primary_subject: bool | None = None
 
+    @model_validator(mode="after")
+    def non_null(self):
+        if any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError("修改字段不能为 null")
+        return self
+
 
 class ReferencePatch(Strict):
     name: Name | None = None
     enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def non_null(self):
+        if any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError("修改字段不能为 null")
+        return self
 
 
 class PromoteReference(Strict):
@@ -742,3 +769,113 @@ class SummaryOutput(Strict):
     narrative: Annotated[str, Field(max_length=10000)]
     highlights: Annotated[list[Highlight], Field(max_length=10)]
     source_refs: Annotated[list[SourceRef], Field(max_length=500)]
+
+
+class ScopeDto(Strict):
+    camera_ids: list[str]
+    subject_id: str | None
+
+
+class OverviewDto(Strict):
+    from_: AwareDatetime = Field(alias="from")
+    to: AwareDatetime
+    scope: ScopeDto
+    coverage: Coverage
+    activities: list[ActivityDuration]
+    duration_is_estimated: bool
+    projection_revision: int
+    latest_events: list[EventDto]
+    warnings: list[WarningDto]
+
+
+class TimelineBucket(Strict):
+    start_at: AwareDatetime
+    end_at: AwareDatetime
+    coverage: Coverage
+    activities: list[ActivityDuration]
+
+
+class TimelineDto(Strict):
+    from_: AwareDatetime = Field(alias="from")
+    to: AwareDatetime
+    scope: ScopeDto
+    bucket_seconds: Literal[60, 300, 900]
+    projection_revision: int
+    buckets: list[TimelineBucket]
+    event_refs: list[dict]
+    truncated: bool
+
+
+class AvailableRange(Strict):
+    from_: AwareDatetime = Field(alias="from")
+    to: AwareDatetime
+
+
+class AnalysisPreviewDto(Strict):
+    preview_token: str
+    expires_at: AwareDatetime
+    available_ranges: list[AvailableRange]
+    missing_ranges: list[AvailableRange]
+    available_frame_count: int
+    earliest_expires_at: AwareDatetime | None
+    reference_set_id: str
+    estimated_batches: int
+    warnings: list[WarningDto]
+
+
+class SettingsUpdateDto(Strict):
+    settings: SettingsDto
+    apply_job: JobDto | None
+
+
+class EventUpdateDto(Strict):
+    event: EventDto
+    projection_revision: int
+    affected_summary_ids: list[str]
+    jobs: list[JobDto]
+
+
+class TokenTotal(Strict):
+    value: int | None
+    known_count: int
+    unknown_count: int
+
+
+class UsageTotal(Strict):
+    requests: int
+    succeeded: int
+    failed: int
+    unknown_usage_requests: int
+    capture_images: int
+    reference_images: int
+    input_tokens: TokenTotal
+    output_tokens: TokenTotal
+    cached_tokens: TokenTotal
+    cost: str | None
+    currency: str | None
+    cost_estimated: bool
+
+
+class UsageBucket(UsageTotal):
+    key: str
+
+
+class UsageDto(Strict):
+    from_: AwareDatetime = Field(alias="from")
+    to: AwareDatetime
+    group_by: Literal["hour", "day", "provider", "purpose"]
+    buckets: list[UsageBucket]
+    totals: UsageTotal
+
+
+class StatusDto(Strict):
+    server_time: AwareDatetime
+    api_version: str
+    db_schema_version: str
+    worker_heartbeat_at: AwareDatetime | None
+    worker_state: Literal["online", "stale", "offline"]
+    cameras: list[dict]
+    queue: dict
+    storage: dict
+    providers: list[dict]
+    warnings: list[WarningDto]

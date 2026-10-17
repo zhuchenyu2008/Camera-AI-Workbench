@@ -5,7 +5,7 @@ from collections import defaultdict
 from sqlalchemy import and_, select, update
 
 from app.errors import AppError, require_revision
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.repositories.db import new_id, one
 from app.schemas import Coverage
 from app.security.secrets import canonical, fingerprint
@@ -136,13 +136,23 @@ class Ledger:
         )
         return [dict(row) for row in rows]
 
-    def calculate(self, conn, start: int, end: int, scope: dict) -> dict:
+    def calculate(self, conn, start: int, end: int, scope: dict, spans_override=None) -> dict:
         planned = {c: self.planned(conn, c, start, end) for c in scope["camera_ids"]}
         captured = {c: intersect(planned[c], self.captured(conn, c, start, end)) for c in planned}
-        spans = self.spans(conn, scope["camera_ids"], start, end)
+        spans = (
+            self.spans(conn, scope["camera_ids"], start, end) if spans_override is None else spans_override
+        )
         minutes = (
             conn.execute(
-                select(s.minute_records).where(
+                select(s.minute_records, s.minute_revisions.c.result_json)
+                .outerjoin(
+                    s.minute_revisions,
+                    and_(
+                        s.minute_records.c.id == s.minute_revisions.c.minute_id,
+                        s.minute_records.c.current_revision == s.minute_revisions.c.revision,
+                    ),
+                )
+                .where(
                     s.minute_records.c.camera_id.in_(scope["camera_ids"]),
                     s.minute_records.c.start_at_ms < end,
                     s.minute_records.c.start_at_ms + 60000 > start,
@@ -203,7 +213,8 @@ class Ledger:
                 matched = [
                     r
                     for r in candidates
-                    if (subject is None or r["subject_id"] == subject) and r["identity_status"] == "matched"
+                    if (subject is None or r["subject_id"] == subject)
+                    and (r["identity_status"] == "matched" or (subject is None and r["origin"] == "manual"))
                 ]
                 if any(r["origin"] == "manual" for r in matched):
                     matched = [r for r in matched if r["origin"] == "manual"]
@@ -242,15 +253,32 @@ class Ledger:
                         for camera in cameras
                         if camera in active_minutes
                     ]
-                    if statuses and all(state in {"complete", "partial"} for state in statuses):
+                    reasons = [
+                        (active_minutes[camera].get("result_json") or {}).get("unanalysed_reason")
+                        for camera in cameras
+                        if camera in active_minutes
+                    ]
+                    if (
+                        statuses
+                        and all(state in {"complete", "partial"} for state in statuses)
+                        and not any(reasons)
+                    ):
                         category = "unknown"
                     else:
                         sub = (
                             "pending"
-                            if not statuses or any(st in {"pending", "running"} for st in statuses)
+                            if "pending" in reasons
                             else "failed"
-                            if "failed" in statuses
+                            if "failed" in reasons
                             else "expired"
+                            if "expired" in reasons
+                            else (
+                                "pending"
+                                if not statuses or any(st in {"pending", "running"} for st in statuses)
+                                else "failed"
+                                if "failed" in statuses
+                                else "expired"
+                            )
                         )
                         category = "unanalysed"
                         coverage[f"unanalysed_{sub}_ms"] += duration
@@ -299,10 +327,11 @@ class Ledger:
                 .all()
             )
             if not any(j["payload_json"].get("summary_id") == summary["id"] for j in existing):
-                payload = {
-                    "summary_id": summary["id"],
-                    "provider_id": self.w.settings_config(conn).summary_provider_id,
-                }
+                from app.summaries.service import Summaries
+
+                if not self.w.settings_config(conn).summary_provider_id:
+                    continue
+                payload = Summaries(self.w).job_payload(conn, summary, self.w.settings_config(conn))
                 job = enqueue(
                     conn,
                     self.w.now(),
@@ -318,15 +347,68 @@ class Ledger:
                 )
         return [r["id"] for r in affected]
 
-    def project(self, conn):
+    def project(self, conn, start=None, end=None):
         revision = self.revision(conn)
         ids = list(conn.execute(select(s.cameras.c.id)).scalars())
-        spans = self.spans(conn, ids, 0, 2**62)
+        merge_gap = self.w.settings_config(conn).merge_gap_seconds * 1000
+        if start is not None and end is not None:
+            # 扩展至相接事件的完整窗口，避免每分钟扫描全部历史。
+            while True:
+                bounds = (start, end)
+                overlapping = conn.execute(
+                    select(s.event_revisions.c.summary_json)
+                    .join(
+                        s.events,
+                        and_(
+                            s.events.c.id == s.event_revisions.c.event_id,
+                            s.events.c.current_revision == s.event_revisions.c.revision,
+                        ),
+                    )
+                    .where(
+                        s.event_revisions.c.summary_json["start_at"].as_string() <= iso(end + merge_gap),
+                        s.event_revisions.c.summary_json["end_at"].as_string() >= iso(start - merge_gap),
+                    )
+                ).scalars()
+                for event in overlapping:
+                    start = min(start, timestamp(event["start_at"]))
+                    end = max(end, timestamp(event["end_at"]))
+                if bounds == (start, end):
+                    break
+        spans = self.spans(conn, ids, start or 0, end or 2**62)
+        # 事件和概览使用同一投影，冲突不能再次显示为有效分类。
+        projected = []
+        by_subject = defaultdict(list)
+        for span in spans:
+            by_subject[span["subject_id"]].append(span)
+        for subject, source_spans in by_subject.items():
+            lo = min(r["start_at_ms"] for r in source_spans)
+            hi = max(r["end_at_ms"] for r in source_spans)
+            slices = self.calculate(conn, lo, hi, {"camera_ids": ids, "subject_id": subject})["slices"]
+            for span in source_spans:
+                for item in slices:
+                    a = max(item["start"], span["start_at_ms"])
+                    b = min(item["end"], span["end_at_ms"])
+                    keep = item["kind"] == "classified" and item["activity"] == span["activity"]
+                    unknown = item["kind"] == "unknown" and (
+                        item["conflict"]
+                        or span["activity"] == "unknown"
+                        or span["identity_status"] != "matched"
+                    )
+                    if a < b and (keep or unknown):
+                        projected.append(
+                            span
+                            | {
+                                "id": "span_" + fingerprint([span["id"], a, b, unknown])[:26],
+                                "start_at_ms": a,
+                                "end_at_ms": b,
+                                "activity": "unknown" if unknown else span["activity"],
+                            }
+                        )
+        spans = projected
         groups = defaultdict(list)
         for span in spans:
             groups[(span["subject_id"], span["activity"], span["identity_status"])].append(span)
         used = set()
-        merge_gap = self.w.settings_config(conn).merge_gap_seconds * 1000
         for (subject, activity, identity), group in groups.items():
             clusters = []
             for span in sorted(group, key=lambda r: (r["start_at_ms"], r["id"])):
@@ -436,6 +518,15 @@ class Ledger:
                 .one()
             )
             info = dict(previous["summary_json"])
+            if (
+                start is not None
+                and end is not None
+                and (
+                    timestamp(info["start_at"]) > end + merge_gap
+                    or timestamp(info["end_at"]) < start - merge_gap
+                )
+            ):
+                continue
             if info["source_state"] == "stale":
                 continue
             replacements = []
@@ -567,7 +658,15 @@ class Ledger:
             old_spans = self.spans(
                 conn, [minute["camera_id"]], minute["start_at_ms"], minute["start_at_ms"] + 60000
             )
-            next_revision = minute["current_revision"] + 1
+            next_revision = (
+                conn.execute(
+                    select(s.minute_revisions.c.revision)
+                    .where(s.minute_revisions.c.minute_id == minute["id"])
+                    .order_by(s.minute_revisions.c.revision.desc())
+                    .limit(1)
+                ).scalar()
+                or 0
+            ) + 1
             old = (
                 conn.execute(
                     select(s.minute_revisions).where(
@@ -674,7 +773,7 @@ class Ledger:
                     )
                     self.w.assets.keep_evidence(conn, evidence_ids, "minute", minute["id"], next_revision)
         rev = self.advance(conn)
-        self.project(conn)
+        self.project(conn, a, b)
         affected = self.invalidate(conn, a, b)
         return dict(
             event=self.event(conn, event_id), projection_revision=rev, affected_summary_ids=affected, jobs=[]

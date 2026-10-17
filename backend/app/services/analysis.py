@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import secrets
 
 from sqlalchemy import select, update
@@ -9,11 +8,11 @@ from app.analysis.client import PROMPT_VERSION, VISUAL_PROMPT, build_payload
 from app.analysis.normalize import normalize
 from app.detection.motion import sparse_frames
 from app.errors import AppError
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.repositories.db import new_id, one
 from app.schemas import VisualOutput
 from app.security.secrets import canonical, fingerprint
-from app.timeutils import intersect, iso, timestamp, union
+from app.timeutils import intersect, iso, subtract, timestamp, union
 from app.worker.queue import enqueue, job_dto
 
 
@@ -66,6 +65,16 @@ class Analysis:
                 "仅部分现场图可用，请确认是否允许部分分析",
                 details={"missing_ranges": [{"from": iso(a), "to": iso(b)} for a, b in missing]},
             )
+        cfg = self.w.settings_config(conn)
+        provider_id = cfg.vision_provider_id if dto.mode == "visual" else cfg.summary_provider_id
+        if not provider_id:
+            raise AppError(422, "PROVIDER_NOT_VERIFIED", "尚未配置所需的模型服务")
+        self.w.require_provider(one(conn, s.providers, provider_id))
+        estimated_batches = (
+            len(self.pack_frames(cfg, one(conn, s.providers, provider_id), refset, frames))
+            if dto.mode == "visual"
+            else 1
+        )
         params = dto.model_dump(mode="json", by_alias=True, exclude={"preview_token"})
         extra = self.w.config_fingerprint(conn) | {"reference_set_id": refset["id"]}
         if create:
@@ -80,9 +89,7 @@ class Analysis:
                 available_frame_count=len(frames),
                 earliest_expires_at=iso(min((f["expires_at_ms"] for f in frames), default=None)),
                 reference_set_id=refset["id"],
-                estimated_batches=math.ceil(
-                    len(frames) / max(1, self.w.settings_config(conn).max_capture_images_per_request)
-                ),
+                estimated_batches=estimated_batches,
                 warnings=[],
             ),
             frames,
@@ -167,13 +174,7 @@ class Analysis:
             + encoded_bytes
         )
 
-    def plan(self, conn, camera_id, frames, refset, mode, *, manual=False, missing=None):
-        camera = one(conn, s.cameras, camera_id, deleted=True)
-        cfg = self.w.settings_config(conn)
-        if not cfg.vision_provider_id:
-            raise AppError(422, "PROVIDER_NOT_VERIFIED", "未配置视觉模型")
-        provider = one(conn, s.providers, cfg.vision_provider_id)
-        self.w.validate_settings_links(conn, cfg)
+    def pack_frames(self, cfg, provider, refset, frames):
         limits = self.w.effective_limits(cfg, provider)
         capacity = min(limits["max_capture_images"], limits["max_total_images"] - len(refset["members_json"]))
         if capacity < 1:
@@ -201,6 +202,16 @@ class Analysis:
                 batch = candidate
         if batch:
             batches.append(batch)
+        return batches
+
+    def plan(self, conn, camera_id, frames, refset, mode, *, manual=False, missing=None):
+        camera = one(conn, s.cameras, camera_id, deleted=True)
+        cfg = self.w.settings_config(conn)
+        if not cfg.vision_provider_id:
+            raise AppError(422, "PROVIDER_NOT_VERIFIED", "未配置视觉模型")
+        provider = one(conn, s.providers, cfg.vision_provider_id)
+        self.w.require_provider(provider)
+        batches = self.pack_frames(cfg, provider, refset, frames)
         minutes = sorted({f["slot_at_ms"] // 60000 * 60000 for f in frames})
         baselines = []
         for start in minutes:
@@ -213,7 +224,14 @@ class Analysis:
                 .mappings()
                 .one()
             )
-            baselines.append({"id": row["id"], "start": start, "revision": row["current_revision"]})
+            baselines.append(
+                {
+                    "id": row["id"],
+                    "start": start,
+                    "revision": row["current_revision"],
+                    "evidence_ids": [f["id"] for f in frames if f["slot_at_ms"] // 60000 * 60000 == start],
+                }
+            )
         stamp = self.w.now()
         common = dict(
             camera_id=camera_id,
@@ -225,6 +243,7 @@ class Analysis:
             mode=mode,
             run_created_at=stamp,
             baselines=baselines,
+            activity_labels=cfg.activity_labels,
         )
         key = fingerprint(
             {k: v for k, v in common.items() if k not in {"run_created_at", "baselines"}}
@@ -244,6 +263,7 @@ class Analysis:
                 f"batch:{key}:{index}",
                 deadline=min(f["expires_at_ms"] for f in batch),
                 total=1,
+                unit="batch",
             )
             children.append(child["id"])
         root = enqueue(
@@ -259,6 +279,7 @@ class Analysis:
             f"run:{key}",
             dependencies=children,
             total=len(baselines),
+            unit="minute",
         )
         return root
 
@@ -271,7 +292,7 @@ class Analysis:
             for child in children
             if child["state"] == "succeeded" and "output" in child["result_json"]
         ]
-        metas = [
+        [
             meta
             for child in children
             if child["state"] == "succeeded"
@@ -280,6 +301,7 @@ class Analysis:
         failed = any(child["state"] in {"failed", "cancelled"} for child in children)
         expired = any(child["state"] == "expired" for child in children)
         links = []
+        completed_units, failed_units, expired_units, omitted_any = 0, 0, 0, False
         for baseline in payload["baselines"]:
             minute = one(conn, s.minute_records, baseline["id"])
             start, end = minute["start_at_ms"], minute["start_at_ms"] + 60000
@@ -287,17 +309,47 @@ class Analysis:
                 {"minutes": [m for m in out["minutes"] if timestamp(m["minute_start"]) == start]}
                 for out in outputs
             ]
+            expected_ids = set(baseline.get("evidence_ids", []))
+            local_children = [
+                child for child in children if expected_ids & set(child["payload_json"]["evidence_ids"])
+            ]
             local_metas = list(
-                {f["id"]: f for f in metas if timestamp(f["captured_at"]) // 60000 * 60000 == start}.values()
+                {
+                    f["id"]: f
+                    for child in local_children
+                    if child["state"] == "succeeded"
+                    and any(
+                        timestamp(m["minute_start"]) == start
+                        for m in child["result_json"].get("output", {}).get("minutes", [])
+                    )
+                    for f in child["result_json"].get("frames", [])
+                    if f["id"] in expected_ids
+                }.values()
             )
             has_result = any(o["minutes"] for o in local_outputs)
+            omitted = any(
+                child["state"] == "succeeded"
+                and not any(
+                    timestamp(m["minute_start"]) == start
+                    for m in child["result_json"].get("output", {}).get("minutes", [])
+                )
+                for child in local_children
+            )
+            omitted_any |= omitted or not has_result
+            local_failed = (
+                any(child["state"] in {"failed", "cancelled"} for child in local_children) or omitted
+            )
+            local_expired = any(child["state"] == "expired" for child in local_children)
+            completed_units += int(has_result)
+            failed_units += int(not has_result and not local_expired)
+            expired_units += int(not has_result and local_expired)
             state = (
                 "partial"
-                if has_result and (failed or expired)
+                if has_result and (local_failed or local_expired)
                 else "complete"
                 if has_result
                 else "expired"
-                if expired
+                if local_expired
                 else "failed"
             )
             captured = self.w.ledger.captured(conn, minute["camera_id"], start, end)
@@ -335,6 +387,22 @@ class Analysis:
                 .first()
             )
             existing = previous["result_json"] if previous else {}
+            preserved = False
+            # 部分重分析只替换新结果实际支持的区间，保留窗口外已经有效的观察。
+            if not existing.get("has_manual_revision"):
+                replaced = [(span["start_at_ms"], span["end_at_ms"]) for span in spans]
+                old_spans = self.w.ledger.spans(conn, [minute["camera_id"]], start, end)
+                for old in old_spans:
+                    for lo, hi in subtract([(old["start_at_ms"], old["end_at_ms"])], replaced):
+                        preserved = True
+                        spans.append(
+                            {
+                                k: v
+                                for k, v in old.items()
+                                if k not in {"id", "camera_id", "minute_id", "minute_revision"}
+                            }
+                            | {"start_at_ms": lo, "end_at_ms": hi}
+                        )
             fingerprint_value = fingerprint([job["id"], minute["id"], local_outputs])
             if conn.execute(
                 select(s.minute_revisions.c.revision).where(
@@ -353,7 +421,8 @@ class Analysis:
                 or 0
             ) + 1
             result = dict(
-                analysis_mode=payload["mode"],
+                visual_outputs=(existing.get("visual_outputs", []) if preserved else []) + local_outputs,
+                analysis_mode="mixed" if len({span["support"] for span in spans}) > 1 else payload["mode"],
                 analysis_state=state,
                 description="；".join(dict.fromkeys(span["details_json"]["observation"] for span in spans))[
                     :3000
@@ -361,8 +430,15 @@ class Analysis:
                 model_version=one(conn, s.providers, payload["provider_id"], deleted=True)["config_json"][
                     "model"
                 ],
-                evidence_ids=[f["id"] for f in local_metas],
+                evidence_ids=sorted(
+                    {f["id"] for f in local_metas} | {e for span in spans for e in span["evidence_ids_json"]}
+                ),
                 has_manual_revision=False,
+                unanalysed_reason="expired"
+                if local_expired
+                else "failed"
+                if local_failed or not has_result
+                else "pending",
                 run_created_at=payload["run_created_at"],
                 sampling={
                     "target_frame_count": 60
@@ -371,10 +447,11 @@ class Analysis:
                     "captured_frame_count": sum(b - a for a, b in captured) // 1000,
                     "submitted_frame_count": len(
                         {
-                            f
-                            for child in children
-                            for f in child["payload_json"]["evidence_ids"]
-                            if f in {m["id"] for m in local_metas}
+                            e
+                            for child in local_children
+                            if child["attempt_count"] > 0
+                            for e in child["payload_json"]["evidence_ids"]
+                            if e in expected_ids
                         }
                     ),
                     "successful_frame_count": len(local_metas),
@@ -405,6 +482,7 @@ class Analysis:
             can_replace = (
                 has_result
                 and not existing.get("has_manual_revision")
+                and not (existing.get("analysis_mode") in {"dense", "mixed"} and payload["mode"] == "sparse")
                 and camera["source_revision"] == payload["source_revision"]
                 and (
                     minute["current_revision"] == baseline["revision"]
@@ -412,7 +490,7 @@ class Analysis:
                     or payload["run_created_at"] > existing.get("run_created_at", 0)
                 )
             )
-            if can_replace or minute["current_revision"] == 0:
+            if can_replace or not minute["current_revision"]:
                 conn.execute(
                     update(s.minute_records)
                     .where(s.minute_records.c.id == minute["id"])
@@ -430,11 +508,38 @@ class Analysis:
             )
             if review and payload["mode"] == "sparse":
                 self.backfill(conn, minute["camera_id"], start, end)
-        self.w.ledger.project(conn)
+        if payload["baselines"]:
+            self.w.ledger.project(
+                conn,
+                min(b["start"] for b in payload["baselines"]),
+                max(b["start"] for b in payload["baselines"]) + 60000,
+            )
+        conn.execute(
+            update(s.jobs)
+            .where(s.jobs.c.id == job["id"])
+            .values(
+                progress_json={
+                    "completed_units": completed_units,
+                    "total_units": len(payload["baselines"]),
+                    "failed_units": failed_units,
+                    "expired_units": expired_units,
+                    "unit": "minute",
+                }
+            )
+        )
+        final_state = (
+            "expired"
+            if not completed_units and expired_units
+            else "failed"
+            if not completed_units
+            else "partial"
+            if failed or expired or omitted_any or payload.get("missing_ranges")
+            else "succeeded"
+        )
         return {
             "links": links,
             "missing_ranges": payload.get("missing_ranges", []),
-        }, "partial" if failed or expired or payload.get("missing_ranges") else "succeeded"
+        }, final_state
 
     def backfill(self, conn, camera_id, start, end):
         cfg = self.w.settings_config(conn)
@@ -451,6 +556,10 @@ class Analysis:
         now = self.w.now()
         cfg = self.w.settings_config(conn)
         if not cfg.vision_provider_id:
+            return
+        try:
+            self.w.require_provider(one(conn, s.providers, cfg.vision_provider_id))
+        except AppError:
             return
         minutes = (
             conn.execute(

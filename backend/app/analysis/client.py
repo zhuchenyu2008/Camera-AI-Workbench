@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from sqlalchemy import update
 
 from app.errors import AppError
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.repositories.db import new_id
 from app.security.secrets import canonical, digest
 from app.timeutils import timestamp

@@ -5,11 +5,11 @@ import os
 import warnings
 
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.errors import AppError, require_revision
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.repositories.db import new_id, one
 from app.schemas import Crop, EntityCreate
 from app.security.secrets import fingerprint, safe_path
@@ -161,24 +161,34 @@ class Assets:
             row["id"]: row["config_json"].get("retention_minutes") or cfg.frame_retention_minutes
             for row in conn.execute(select(s.cameras)).mappings()
         }
-        query = select(s.frames).where(s.frames.c.state == "available")
-        if camera_id:
-            query = query.where(s.frames.c.camera_id == camera_id)
-        for row in conn.execute(query).mappings():
-            ttl = min(retention[row["camera_id"]], 10) if row["is_test"] else retention[row["camera_id"]]
-            current_expiry = min(row["expires_at_ms"], row["captured_at_ms"] + ttl * 60000)
-            expired = current_expiry <= self.w.now()
-            expiry = current_expiry if freeze_only or expired else row["captured_at_ms"] + ttl * 60000
-            changes = {"expires_at_ms": expiry}
-            if expired:
-                changes |= {"state": "expired", "reason": "ttl"}
-            if not freeze_only or expired:
-                conn.execute(update(s.frames).where(s.frames.c.id == row["id"]).values(**changes))
-                conn.execute(
-                    update(s.evidence_refs)
-                    .where(s.evidence_refs.c.evidence_id == row["id"])
-                    .values(**changes)
-                )
+        # 每路使用批量 SQL，避免保留期增大后在事务里逐帧循环。
+        for resource_id, ttl in retention.items():
+            if camera_id and resource_id != camera_id:
+                continue
+            frame_target = s.frames.c.captured_at_ms + case(
+                (s.frames.c.is_test.is_(True), min(ttl, 10) * 60000), else_=ttl * 60000
+            )
+            frame_expiry = func.min(s.frames.c.expires_at_ms, frame_target)
+            filters = (s.frames.c.camera_id == resource_id, s.frames.c.state == "available")
+            conn.execute(
+                update(s.frames)
+                .where(*filters, frame_expiry <= self.w.now())
+                .values(state="expired", reason="ttl", expires_at_ms=frame_expiry)
+            )
+            test_ids = select(s.frames.c.id).where(s.frames.c.is_test.is_(True))
+            ref_target = s.evidence_refs.c.captured_at_ms + case(
+                (s.evidence_refs.c.evidence_id.in_(test_ids), min(ttl, 10) * 60000), else_=ttl * 60000
+            )
+            ref_expiry = func.min(s.evidence_refs.c.expires_at_ms, ref_target)
+            ref_filters = (s.evidence_refs.c.camera_id == resource_id, s.evidence_refs.c.state == "available")
+            conn.execute(
+                update(s.evidence_refs)
+                .where(*ref_filters, ref_expiry <= self.w.now())
+                .values(state="expired", reason="ttl", expires_at_ms=ref_expiry)
+            )
+            if not freeze_only:
+                conn.execute(update(s.frames).where(*filters).values(expires_at_ms=frame_target))
+                conn.execute(update(s.evidence_refs).where(*ref_filters).values(expires_at_ms=ref_target))
 
     def keep_evidence(self, conn, evidence_ids: list[str], kind: str, owner_id: str, revision: int):
         for evidence_id in sorted(set(evidence_ids)):

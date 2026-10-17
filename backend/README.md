@@ -11,6 +11,8 @@ python -m venv ../.venv
 ../.venv/Scripts/python -m pytest
 ```
 
+完整依赖锁包含运行和验收工具，干净环境可执行 `python -m pip install -r requirements.lock`。当前数据库迁移为 `0003`。生成同源 OpenAPI、TypeScript、样例和57项路由审计用 `python -m scripts.build_contracts`；CI 用 `--check` 拒绝产物过期。TypeScript 编译命令见逐项清单。
+
 Linux 部署使用 Python 虚拟环境。配置 `CAW_DATA_DIR`、`CAW_DATABASE_URL`、`CAW_MASTER_KEY_FILE`、`CAW_ALLOWED_ORIGIN`、`CAW_RTSP_ALLOWED_PORTS`、`CAW_PROVIDER_ALLOWED_HOSTS`；域名与端口由部署人员填写，主密钥必须放在仓库外。
 
 ```sh

@@ -7,7 +7,7 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from sqlalchemy import delete, select, update
 
 from app.errors import AppError
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.security.secrets import constant_equal, digest
 from app.timeutils import iso
 

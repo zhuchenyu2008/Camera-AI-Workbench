@@ -1,0 +1,31 @@
+[Unit]
+Description=Camera AI Workbench Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=camera-workbench
+Group=camera-workbench
+WorkingDirectory=/opt/camera-workbench/backend
+EnvironmentFile=/etc/camera-ai-workbench/workbench.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/opt/camera-workbench/.venv/bin/python -m app.cli check-config
+ExecStart=/opt/camera-workbench/.venv/bin/python -m app.worker_main
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/camera-ai-workbench
+UMask=0077
+MemoryHigh=650M
+MemoryMax=1100M
+TasksMax=96
+CPUQuota=400%
+
+[Install]
+WantedBy=multi-user.target

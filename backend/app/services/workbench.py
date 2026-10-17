@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select, update
 
 from app.config import Config
 from app.errors import AppError, require_revision
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.repositories.db import Database, new_id, one
 from app.schemas import CameraCreate, ProviderWrite, Regions, SettingsConfig
 from app.security.auth import Auth
@@ -399,6 +399,8 @@ class Workbench:
             else self.settings_config(conn)
         )
         current = global_row if resource_id == "singleton" else one(conn, s.cameras, resource_id)
+        if cfg.ai_concurrency > self.config.validated_ai_concurrency:
+            raise AppError(422, "CAPACITY_UNVERIFIED", "此并发值尚未通过部署环境容量验证")
         if base_revision != current["revision"]:
             raise AppError(
                 412, "REVISION_CONFLICT", "预检基线已过期", details={"revision": current["revision"]}
@@ -459,20 +461,24 @@ class Workbench:
     def validate_settings_links(self, conn, cfg: SettingsConfig):
         for provider_id in {cfg.vision_provider_id, cfg.summary_provider_id} - {None}:
             p = one(conn, s.providers, provider_id)
-            cap = p["capabilities_json"]
-            if (
-                p["tested_config_revision"] != p["revision"]
-                or not cap.get("vision")
-                or not cap.get("data_url")
-                or p["config_json"]["response_format_mode"] not in cap.get("structured_output_modes", [])
-            ):
-                raise AppError(422, "PROVIDER_NOT_VERIFIED", "模型服务需通过当前配置的图像与结构化输出测试")
+            self.require_provider(p)
         if cfg.primary_subject_id:
             entity = one(conn, s.entities, cfg.primary_subject_id)
             if entity["kind"] != "person" or not entity["enabled"]:
                 raise AppError(422, "VALIDATION_ERROR", "主人物须为已启用人物")
 
-    def update_settings(self, conn, dto, header):
+    @staticmethod
+    def require_provider(provider):
+        cap = provider["capabilities_json"]
+        if (
+            provider["tested_config_revision"] != provider["revision"]
+            or not cap.get("vision")
+            or not cap.get("data_url")
+            or provider["config_json"]["response_format_mode"] not in cap.get("structured_output_modes", [])
+        ):
+            raise AppError(422, "PROVIDER_NOT_VERIFIED", "模型服务需通过当前配置的图像与结构化输出测试")
+
+    def update_settings(self, conn, dto, header, disk_free=None):
         row = one(conn, s.settings, "singleton")
         require_revision(row, header)
         cfg = SettingsConfig.model_validate(row["config_json"] | dto.patch)
@@ -486,6 +492,9 @@ class Workbench:
             dto.patch,
             self.config_fingerprint(conn),
         )
+        if cfg.ai_concurrency > self.config.validated_ai_concurrency:
+            raise AppError(422, "CAPACITY_UNVERIFIED", "此并发值尚未通过部署环境容量验证")
+        self.impact(conn, dto.patch, base_revision=row["revision"], disk_free=disk_free)
         for camera in conn.execute(select(s.cameras).where(s.cameras.c.deleted_at_ms.is_(None))).mappings():
             ttl = camera["config_json"].get("retention_minutes") or cfg.frame_retention_minutes
             if ttl * 60 < cfg.minimum_retention_seconds():
@@ -523,7 +532,7 @@ class Workbench:
         )
         return {"settings": self.settings(conn), "apply_job": job_dto(job)}
 
-    def update_camera(self, conn, resource_id, patch: dict, token, header):
+    def update_camera(self, conn, resource_id, patch: dict, token, header, disk_free=None):
         row = one(conn, s.cameras, resource_id)
         require_revision(row, header)
         cfg, credentials = self.merged_camera(row, patch)
@@ -533,6 +542,7 @@ class Workbench:
             self.check_preview(
                 token, "camera", resource_id, row["revision"], patch, self.config_fingerprint(conn)
             )
+            self.impact(conn, patch, resource_id, row["revision"], disk_free=disk_free)
         enabled = patch.get("enabled", row["enabled"])
         settings = self.settings_config(conn)
         if enabled and (not settings.vision_provider_id or not settings.summary_provider_id):

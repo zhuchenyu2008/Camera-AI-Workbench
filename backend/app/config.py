@@ -18,6 +18,7 @@ class Config:
     ffmpeg: str = "ffmpeg"
     secure_cookies: bool = True
     session_seconds: int = 86400
+    validated_ai_concurrency: int = 2
     max_upload_bytes: int = 8 * 1024 * 1024
     clock: object = field(default=None, repr=False, compare=False)
 
@@ -47,6 +48,7 @@ class Config:
                 filter(None, os.environ.get("CAW_PROVIDER_LOCAL_ENDPOINTS", "").split(","))
             ),
             ffmpeg=os.environ.get("CAW_FFMPEG", "ffmpeg"),
+            validated_ai_concurrency=int(os.environ.get("CAW_VALIDATED_AI_CONCURRENCY", "2")),
         )
 
     def prepare(self) -> None:

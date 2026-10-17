@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.activities.ledger import segment_dto
 from app.errors import AppError
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.repositories.db import one
 from app.timeutils import iso
 
@@ -15,7 +15,7 @@ class Records:
 
     def minute(self, conn, minute_id, revision=None, compact=False):
         minute = one(conn, s.minute_records, minute_id)
-        version = revision or minute["current_revision"]
+        version = revision or minute["current_revision"] or 0
         row = (
             conn.execute(
                 select(s.minute_revisions).where(
@@ -47,7 +47,11 @@ class Records:
                 pass
         scope = {"camera_ids": [minute["camera_id"]], "subject_id": None}
         calculated = self.w.ledger.calculate(
-            conn, minute["start_at_ms"], minute["start_at_ms"] + 60000, scope
+            conn,
+            minute["start_at_ms"],
+            minute["start_at_ms"] + 60000,
+            scope,
+            spans_override=spans if revision is not None else None,
         )
         capture = (
             conn.execute(select(s.minute_capture).where(s.minute_capture.c.minute_id == minute_id))
@@ -141,7 +145,12 @@ class Records:
             frame = frames.get(slot)
             evidence = self.w.assets.metadata(conn, frame["id"]) if frame else None
             bit = 1 << i
-            state, reason = "not_captured", capture["gap_reasons_json"].get(str(i), "no_frame")
+            state, reason = (
+                "not_captured",
+                capture["gap_reasons_json"].get(
+                    str(i), capture["gap_reasons_json"].get("default", "no_frame")
+                ),
+            )
             if not capture["planned_bitmap"] & bit:
                 state, reason = "outside_schedule", "outside_schedule"
             elif evidence:

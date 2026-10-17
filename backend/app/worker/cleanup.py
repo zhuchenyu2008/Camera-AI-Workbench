@@ -5,7 +5,8 @@ import shutil
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from app.repositories import schema_v1 as s
+from app.errors import AppError
+from app.repositories import schema as s
 from app.security.secrets import safe_path
 
 
@@ -54,7 +55,7 @@ class Cleaner:
                 dict(row)
                 for row in conn.execute(
                     select(s.frames)
-                    .where(s.frames.c.state != "available")
+                    .where(s.frames.c.state != "available", s.frames.c.file_deleted_at_ms.is_(None))
                     .order_by(s.frames.c.expires_at_ms)
                     .limit(500)
                 ).mappings()
@@ -74,12 +75,35 @@ class Cleaner:
                 ).mappings()
             ]
         removed, failed = 0, 0
-        for frame in expired:
-            try:
-                safe_path(self.w.config.data_dir, frame["relpath"]).unlink(missing_ok=True)
-                removed += 1
-            except OSError:
-                failed += 1
+        failed_ids = set()
+        while expired:
+            for frame in expired:
+                try:
+                    safe_path(self.w.config.data_dir, frame["relpath"]).unlink(missing_ok=True)
+                    with self.w.db.write() as conn:
+                        conn.execute(
+                            update(s.frames)
+                            .where(s.frames.c.id == frame["id"])
+                            .values(file_deleted_at_ms=now)
+                        )
+                    removed += 1
+                except (OSError, AppError):
+                    failed += 1
+                    failed_ids.add(frame["id"])
+            with self.w.db.read() as conn:
+                expired = [
+                    dict(row)
+                    for row in conn.execute(
+                        select(s.frames)
+                        .where(
+                            s.frames.c.state != "available",
+                            s.frames.c.file_deleted_at_ms.is_(None),
+                            s.frames.c.id.not_in(failed_ids),
+                        )
+                        .order_by(s.frames.c.expires_at_ms)
+                        .limit(500)
+                    ).mappings()
+                ]
         for asset in deleted_assets:
             try:
                 safe_path(self.w.config.data_dir, asset["relpath"]).unlink(missing_ok=True)
@@ -110,6 +134,32 @@ class Cleaner:
                     .limit(500)
                 ).mappings()
             ]
+            previous_scan = conn.execute(
+                select(s.system_state.c.value_json).where(s.system_state.c.id == "storage")
+            ).scalar()
+            marker = (previous_scan or {}).get("frame_scan_cursor") or ""
+            scanning = [
+                dict(row)
+                for row in conn.execute(
+                    select(s.frames)
+                    .where(s.frames.c.state == "available", s.frames.c.id > marker)
+                    .order_by(s.frames.c.id)
+                    .limit(500)
+                ).mappings()
+            ]
+        missing_ids = set()
+        for frame in scanning:
+            try:
+                exists = safe_path(self.w.config.data_dir, frame["relpath"]).is_file()
+            except AppError:
+                exists = False
+            if not exists:
+                missing_ids.add(frame["id"])
+                with self.w.db.write() as conn:
+                    self.mark(conn, frame, "missing", "missing_file")
+                media -= frame["bytes"]
+        # 容量回收只处理仍可用的资产，缺失文件不会重复充当“已释放字节”。
+        oldest = [frame for frame in oldest if frame["id"] not in missing_ids]
         for frame in oldest:
             if media <= cfg.media_quota_gb * 1e9 and free >= cfg.disk_pressure_free_gb * 1e9:
                 break
@@ -119,6 +169,10 @@ class Cleaner:
                 )
             try:
                 safe_path(self.w.config.data_dir, frame["relpath"]).unlink(missing_ok=True)
+                with self.w.db.write() as conn:
+                    conn.execute(
+                        update(s.frames).where(s.frames.c.id == frame["id"]).values(file_deleted_at_ms=now)
+                    )
                 media -= frame["bytes"]
                 free += frame["bytes"]
                 evicted += 1
@@ -145,9 +199,11 @@ class Cleaner:
                     and path.stat().st_mtime * 1000 < now - 120000
                 ):
                     try:
-                        path.unlink()
+                        safe_path(
+                            self.w.config.data_dir, path.relative_to(self.w.config.data_dir).as_posix()
+                        ).unlink()
                         removed += 1
-                    except OSError:
+                    except (OSError, AppError):
                         failed += 1
         hls_bytes = 0
         for directory in (self.w.config.data_dir / "hls").iterdir():
@@ -200,6 +256,7 @@ class Cleaner:
                 prior.get("paused", False) and (not safe_since or now - safe_since < 60000)
             )
             state = dict(
+                frame_scan_cursor=scanning[-1]["id"] if scanning else None,
                 total_bytes=shutil.disk_usage(self.w.config.data_dir).total,
                 free_bytes=free,
                 media_bytes=media,

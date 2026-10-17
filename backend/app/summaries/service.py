@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, select, update
 
 from app.errors import AppError
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.repositories.db import new_id, one
 from app.schemas import SummaryOutput
 from app.security.secrets import canonical, fingerprint
@@ -67,7 +67,22 @@ class Summaries:
         conn.execute(s.summaries.insert().values(**row))
         return row
 
-    def context(self, conn, summary):
+    def job_payload(self, conn, summary, cfg):
+        import json
+
+        if not cfg.summary_provider_id:
+            raise AppError(422, "PROVIDER_NOT_VERIFIED", "尚未配置汇总模型")
+        provider = one(conn, s.providers, cfg.summary_provider_id)
+        scope = json.loads(summary["scope_key"])
+        refs = self.w.assets.reference_set(conn, scope["camera_ids"])
+        return {
+            "summary_id": summary["id"],
+            "provider_id": provider["id"],
+            "provider_revision": provider["revision"],
+            "reference_set_id": refs["id"],
+        }
+
+    def context(self, conn, summary, reference_set_id=None):
         import json
 
         scope = json.loads(summary["scope_key"])
@@ -141,7 +156,11 @@ class Summaries:
                             end_at=iso(hour["end_at_ms"]),
                         )
                     )
-        refset = self.w.assets.reference_set(conn, scope["camera_ids"])
+        refset = (
+            one(conn, s.reference_sets, reference_set_id)
+            if reference_set_id
+            else self.w.assets.reference_set(conn, scope["camera_ids"])
+        )
         stats = {k: v for k, v in calculated.items() if k != "slices"}
         key = fingerprint([sources, stats, refset["fingerprint"], "statistics-v1", "summary-v1"])
         return dict(
@@ -215,7 +234,21 @@ class Summaries:
             )
         )
         if stale:
-            self.w.ledger.invalidate(conn, summary["start_at_ms"], summary["end_at_ms"])
+            cfg = self.w.settings_config(conn)
+            if cfg.summary_provider_id:
+                job = enqueue(
+                    conn,
+                    self.w.now(),
+                    f"summarize_{summary['type']}",
+                    self.job_payload(conn, summary, cfg),
+                    f"summary-refresh:{summary['id']}:{fresh['fingerprint']}",
+                    delay=60000,
+                )
+                conn.execute(
+                    update(s.summaries)
+                    .where(s.summaries.c.id == summary["id"])
+                    .values(pending_job_id=job["id"])
+                )
         if summary["type"] == "hour":
             for day in conn.execute(
                 select(s.summaries).where(
@@ -228,6 +261,27 @@ class Summaries:
                 conn.execute(
                     update(s.summaries).where(s.summaries.c.id == day["id"]).values(source_state="stale")
                 )
+                pending = conn.execute(
+                    select(s.jobs.c.id).where(
+                        s.jobs.c.state.in_(["queued", "running"]),
+                        s.jobs.c.payload_json["summary_id"].as_string() == day["id"],
+                    )
+                ).first()
+                cfg = self.w.settings_config(conn)
+                if pending is None and cfg.summary_provider_id:
+                    job = enqueue(
+                        conn,
+                        self.w.now(),
+                        "summarize_day",
+                        self.job_payload(conn, day, cfg),
+                        f"day-after-hour:{day['id']}:{summary['id']}:{revision}",
+                        delay=60000,
+                    )
+                    conn.execute(
+                        update(s.summaries)
+                        .where(s.summaries.c.id == day["id"])
+                        .values(pending_job_id=job["id"])
+                    )
         return {
             "resource_kind": "summary",
             "resource_id": summary["id"],
@@ -306,7 +360,7 @@ class Summaries:
             conn,
             self.w.now(),
             "manual_records",
-            {"summary_id": summary["id"], "provider_id": cfg.summary_provider_id},
+            self.job_payload(conn, summary, cfg),
             f"manual-summary:{summary['id']}:{secrets.token_urlsafe(16)}",
             total=1,
         )
@@ -319,6 +373,10 @@ class Summaries:
         cfg = self.w.settings_config(conn)
         first = conn.execute(select(func.min(s.minute_records.c.start_at_ms))).scalar()
         if first is None or not cfg.summary_provider_id:
+            return
+        try:
+            self.w.require_provider(one(conn, s.providers, cfg.summary_provider_id))
+        except AppError:
             return
         now = self.w.now()
         # 每轮有界补调度，重启不重造采集历史。
@@ -341,7 +399,7 @@ class Summaries:
                         conn,
                         now,
                         "summarize_hour",
-                        {"summary_id": summary["id"], "provider_id": cfg.summary_provider_id},
+                        self.job_payload(conn, summary, cfg),
                         f"summary-initial:{summary['id']}",
                     )
                     conn.execute(
@@ -366,7 +424,7 @@ class Summaries:
                             conn,
                             now,
                             "summarize_day",
-                            {"summary_id": summary["id"], "provider_id": cfg.summary_provider_id},
+                            self.job_payload(conn, summary, cfg),
                             f"summary-initial:{summary['id']}",
                         )
                         conn.execute(

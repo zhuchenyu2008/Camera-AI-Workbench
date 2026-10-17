@@ -10,11 +10,11 @@ from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.exc import OperationalError
 
 from app.errors import AppError, not_found
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.schemas import SettingsConfig
 from app.timeutils import now_ms
 
-SCHEMA_VERSION = "0001"
+SCHEMA_VERSION = "0003"
 
 
 def new_id(prefix: str) -> str:

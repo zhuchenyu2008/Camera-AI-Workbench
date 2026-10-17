@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.errors import AppError
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.repositories.db import new_id, one
 from app.security.secrets import digest, safe_path
 
@@ -95,17 +95,17 @@ class FrameWriter:
                 ).rowcount
                 if inserted != 1:
                     return None
-                conn.execute(
-                    update(s.camera_runtime)
-                    .where(s.camera_runtime.c.camera_id == camera_id)
-                    .values(
-                        last_frame_at_ms=captured_at,
-                        capture_state="online",
-                        stop_reason=None,
-                        heartbeat_at_ms=self.w.now(),
-                    )
-                )
                 if not is_test:
+                    conn.execute(
+                        update(s.camera_runtime)
+                        .where(s.camera_runtime.c.camera_id == camera_id)
+                        .values(
+                            last_frame_at_ms=captured_at,
+                            capture_state="online",
+                            stop_reason=None,
+                            heartbeat_at_ms=self.w.now(),
+                        )
+                    )
                     self.minute_slot(conn, camera_id, slot, camera["revision"], captured=True)
             return row
         finally:
@@ -115,6 +115,9 @@ class FrameWriter:
                 safe_path(self.w.config.data_dir, relpath).unlink(missing_ok=True)
 
     def minute_slot(self, conn, camera_id: str, slot: int, revision: int, captured=False, reason=None):
+        planned = bool(self.w.ledger.planned(conn, camera_id, slot, slot + 1000))
+        if not planned and not captured:
+            return None
         start = slot // 60000 * 60000
         minute = (
             conn.execute(
@@ -130,7 +133,7 @@ class FrameWriter:
                 id=new_id("min"),
                 camera_id=camera_id,
                 start_at_ms=start,
-                current_revision=0,
+                current_revision=None,
                 analysis_state="pending",
                 created_at_ms=self.w.now(),
             )
@@ -152,7 +155,6 @@ class FrameWriter:
             .one()
         )
         bit = 1 << ((slot - start) // 1000)
-        planned = bool(self.w.ledger.planned(conn, camera_id, slot, slot + 1000))
         changes = {
             "planned_bitmap": capture["planned_bitmap"] | bit if planned else capture["planned_bitmap"]
         }

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import random
 import secrets
+import time
 
 from sqlalchemy import case, or_, select, update
 
 from app.errors import AppError
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.repositories.db import new_id, one
 from app.schemas import Progress
 from app.timeutils import iso
@@ -27,6 +28,7 @@ def enqueue(
     delay: int = 0,
     dependencies: list[str] | None = None,
     total: int | None = None,
+    unit: str = "step",
 ) -> dict:
     existing = conn.execute(select(s.jobs).where(s.jobs.c.dedup_key == dedup_key)).mappings().first()
     if existing:
@@ -50,7 +52,7 @@ def enqueue(
         state="queued",
         queue_reason="dependency" if dependencies else "scheduled",
         phase="queued",
-        progress_json=Progress(total_units=total).model_dump(),
+        progress_json=Progress(total_units=total, unit=unit).model_dump(),
         priority=priority,
         not_before_ms=now + delay,
         deadline_at_ms=deadline,
@@ -210,10 +212,13 @@ class Queue:
                 return row | values
         return None
 
-    @staticmethod
-    def guard(conn, job: dict):
+    def guard(self, conn, job: dict):
         row = one(conn, s.jobs, job["id"])
-        if row["state"] != "running" or row["lease_token"] != job["lease_token"]:
+        if (
+            row["state"] != "running"
+            or row["lease_token"] != job["lease_token"]
+            or (row["lease_until_ms"] or 0) <= self.w.now()
+        ):
             raise AppError(409, "LEASE_LOST", "任务租约已失效")
         if row["cancel_requested"]:
             raise AppError(409, "JOB_CANCELLED", "任务已取消")
@@ -236,6 +241,17 @@ class Queue:
             )
 
     def finish(self, job: dict, state="succeeded", result=None, commit=None):
+        for delay in (0, 0.05, 0.2, 0.5):
+            if delay:
+                time.sleep(delay)
+            try:
+                return self._finish_once(job, state, result, commit)
+            except AppError as error:
+                if error.code != "DB_BUSY":
+                    raise
+        raise AppError(503, "DB_BUSY", "提交结果时数据库持续繁忙，请检查存储")
+
+    def _finish_once(self, job: dict, state="succeeded", result=None, commit=None):
         with self.w.db.write() as conn:
             self.guard(conn, job)
             if commit:
@@ -311,7 +327,11 @@ class Queue:
             if current["cancel_requested"] or error.code == "JOB_CANCELLED":
                 state, reason, wait = "cancelled", None, 0
             elif error.code == "PROVIDER_AUTH_FAILED":
-                state, reason, wait = "queued", "provider_paused", 30000
+                state, reason, wait = (
+                    ("failed", None, 0)
+                    if job["kind"] == "provider_test"
+                    else ("queued", "provider_paused", 30000)
+                )
                 provider_id = job["payload_json"].get("provider_id")
                 conn.execute(
                     update(s.providers)
@@ -320,9 +340,11 @@ class Queue:
                 )
             else:
                 settings = self.w.settings_config(conn)
-                attempts = current["attempt_count"]
+                attempts = current["failure_count"] + 1
                 invalid_output = error.code in {"INVALID_MODEL_OUTPUT", "INVALID_MODEL_REFERENCES"}
-                budget = 2 if invalid_output else 1 + settings.ai_retry_count
+                budget = (
+                    min(2, 1 + settings.ai_retry_count) if invalid_output else 1 + settings.ai_retry_count
+                )
                 retry = (error.retryable or invalid_output) and attempts < budget
                 wait = max(
                     int([30000, 120000, 300000][min(max(attempts - 1, 0), 2)] * random.uniform(1, 1.1)),
@@ -357,6 +379,7 @@ class Queue:
                     lease_until_ms=None,
                     finished_at_ms=now if state in TERMINAL else None,
                     updated_at_ms=now,
+                    failure_count=current["failure_count"] + 1,
                 )
             )
 
@@ -367,4 +390,19 @@ class Queue:
         if job["state"] == "queued":
             changes |= {"state": "cancelled", "phase": "cancelled", "finished_at_ms": self.w.now()}
         conn.execute(update(s.jobs).where(s.jobs.c.id == job["id"]).values(**changes))
+        if job["kind"] in {"manual_visual", "reconcile_minutes"}:
+            for baseline in job["payload_json"].get("baselines", []):
+                minute = one(conn, s.minute_records, baseline["id"])
+                if not minute["current_revision"]:
+                    conn.execute(
+                        update(s.minute_records)
+                        .where(s.minute_records.c.id == minute["id"])
+                        .values(analysis_state="failed")
+                    )
+                    self.w.ledger.advance(conn)
+                    self.w.ledger.invalidate(conn, minute["start_at_ms"], minute["start_at_ms"] + 60000)
+        for child_id in job["payload_json"].get("children", []):
+            child = one(conn, s.jobs, child_id)
+            if child["state"] not in TERMINAL:
+                self.cancel(conn, child)
         return job | changes

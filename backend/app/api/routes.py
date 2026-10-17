@@ -10,10 +10,11 @@ from sqlalchemy import and_, func, select
 
 from app.api.common import mutation, page_rows, range_ms, respond
 from app.errors import AppError
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.repositories.db import one
 from app.schemas import (
     AnalysisCreate,
+    AnalysisPreviewDto,
     AnalysisRequest,
     CameraControl,
     CameraControlDto,
@@ -28,6 +29,7 @@ from app.schemas import (
     Envelope,
     EventCorrection,
     EventDto,
+    EventUpdateDto,
     EvidenceDto,
     ImpactPreviewDto,
     JobDto,
@@ -35,6 +37,7 @@ from app.schemas import (
     Login,
     MinuteDto,
     MinuteEvidenceSlotDto,
+    OverviewDto,
     PasswordChange,
     PreviewDto,
     PromoteReference,
@@ -48,7 +51,11 @@ from app.schemas import (
     SettingsDto,
     SettingsPreview,
     SettingsUpdate,
+    SettingsUpdateDto,
+    StatusDto,
     SummaryDto,
+    TimelineDto,
+    UsageDto,
 )
 from app.security.secrets import digest, safe_path
 from app.services.analysis import Analysis
@@ -161,6 +168,7 @@ def preview_camera(request: Request, camera_id: str, dto: CameraPreview):
 @router.patch("/api/cameras/{camera_id}", operation_id="updateCamera", response_model=Envelope[CameraDto])
 def update_camera(request: Request, camera_id: str, dto: CameraPatch):
     w = request.app.state.workbench
+    free = w.disk_free()
     patch = dto.model_dump(mode="json", exclude_unset=True, exclude={"preview_token"})
     return mutation(
         request,
@@ -168,7 +176,9 @@ def update_camera(request: Request, camera_id: str, dto: CameraPatch):
         dto.model_dump(mode="json", exclude_unset=True),
         lambda conn: (
             200,
-            w.update_camera(conn, camera_id, patch, dto.preview_token, request.headers.get("If-Match")),
+            w.update_camera(
+                conn, camera_id, patch, dto.preview_token, request.headers.get("If-Match"), disk_free=free
+            ),
         ),
     )
 
@@ -301,6 +311,7 @@ def preview_status(request: Request, camera_id: str):
 @router.get(
     "/api/cameras/{camera_id}/preview/{session_id}/{filename}",
     operation_id="getPreviewMedia",
+    response_class=Response,
     responses={200: {"content": {"application/vnd.apple.mpegurl": {}, "video/mp2t": {}}}},
 )
 def preview_media(request: Request, camera_id: str, session_id: str, filename: str):
@@ -330,6 +341,7 @@ def preview_media(request: Request, camera_id: str, session_id: str, filename: s
 @router.get(
     "/api/cameras/{camera_id}/snapshot",
     operation_id="getSnapshot",
+    response_class=Response,
     responses={200: {"content": {"image/jpeg": {}}}},
 )
 def snapshot(request: Request, camera_id: str):
@@ -353,7 +365,7 @@ def snapshot(request: Request, camera_id: str):
     )
 
 
-@router.get("/api/overview", operation_id="getOverview", response_model=Envelope[dict])
+@router.get("/api/overview", operation_id="getOverview", response_model=Envelope[OverviewDto])
 def overview(
     request: Request,
     from_: str = Query(alias="from"),
@@ -366,6 +378,8 @@ def overview(
     today = datetime.fromtimestamp(w.now() / 1000, BEIJING).date().isoformat()
     if datetime.fromtimestamp(a / 1000, BEIJING).date().isoformat() == today:
         b = min(b, w.now())
+    if b <= a:
+        raise AppError(400, "INVALID_TIME_RANGE", "裁剪至当前时间后没有可查询区间")
     with w.db.read() as conn:
         scope = w.ledger.scope(conn, camera_ids, subject_id, a, b)
         result = w.ledger.calculate(conn, a, b, scope)
@@ -405,7 +419,7 @@ def event_rows(w, conn, a, b, scope, activity, limit=100):
     return result
 
 
-@router.get("/api/timeline", operation_id="getTimeline", response_model=Envelope[dict])
+@router.get("/api/timeline", operation_id="getTimeline", response_model=Envelope[TimelineDto])
 def timeline(
     request: Request,
     from_: str = Query(alias="from"),
@@ -512,7 +526,7 @@ def event(request: Request, event_id: str, revision: int | None = Query(None, ge
         return respond(request, w.ledger.event(conn, event_id, revision))
 
 
-@router.patch("/api/events/{event_id}", operation_id="updateEvent", response_model=Envelope[dict])
+@router.patch("/api/events/{event_id}", operation_id="updateEvent", response_model=Envelope[EventUpdateDto])
 def correct_event(request: Request, event_id: str, dto: EventCorrection):
     w = request.app.state.workbench
     return mutation(
@@ -580,7 +594,10 @@ def minute_evidence(request: Request, minute_id: str, limit: Limit = 50, cursor:
         slots = Records(w).evidence_slots(conn, minute_id)
     start = 0
     if cursor:
-        info = w.secrets.verify(cursor)
+        try:
+            info = w.secrets.verify(cursor)
+        except AppError:
+            raise AppError(400, "INVALID_CURSOR", "证据游标无效") from None
         if info.get("minute") != minute_id or info.get("expires", 0) <= w.now():
             raise AppError(400, "INVALID_CURSOR", "证据游标无效")
         start = info.get("offset", 0)
@@ -610,6 +627,7 @@ def evidence_metadata(request: Request, evidence_id: str):
 @router.get(
     "/api/evidence/{evidence_id}",
     operation_id="getEvidence",
+    response_class=Response,
     responses={200: {"content": {"image/jpeg": {}}}},
 )
 def evidence(request: Request, evidence_id: str):
@@ -617,7 +635,9 @@ def evidence(request: Request, evidence_id: str):
     return Response(data, media_type="image/jpeg")
 
 
-@router.post("/api/analysis-jobs/preview", operation_id="previewAnalysis", response_model=Envelope[dict])
+@router.post(
+    "/api/analysis-jobs/preview", operation_id="previewAnalysis", response_model=Envelope[AnalysisPreviewDto]
+)
 def preview_analysis(request: Request, dto: AnalysisRequest):
     w = request.app.state.workbench
     with w.db.write() as conn:
@@ -677,7 +697,11 @@ def jobs(
 
 
 @router.post(
-    "/api/jobs/{job_id}/cancel", operation_id="cancelJob", status_code=202, response_model=Envelope[JobDto]
+    "/api/jobs/{job_id}/cancel",
+    operation_id="cancelJob",
+    status_code=202,
+    response_model=Envelope[JobDto],
+    responses={200: {"model": Envelope[JobDto]}},
 )
 def cancel_job(request: Request, job_id: str):
     w = request.app.state.workbench
@@ -1062,6 +1086,7 @@ def delete_reference(request: Request, asset_id: str):
 @router.get(
     "/api/reference-assets/{asset_id}/content",
     operation_id="getReferenceContent",
+    response_class=Response,
     responses={200: {"content": {"image/jpeg": {}}}},
 )
 def reference_content(request: Request, asset_id: str, version: int | None = Query(None, ge=1)):
@@ -1164,25 +1189,26 @@ def preview_settings(request: Request, dto: SettingsPreview):
         return respond(request, w.impact(conn, dto.patch, base_revision=dto.base_revision, disk_free=free))
 
 
-@router.patch("/api/settings", operation_id="updateSettings", response_model=Envelope[dict])
+@router.patch("/api/settings", operation_id="updateSettings", response_model=Envelope[SettingsUpdateDto])
 def update_settings(request: Request, dto: SettingsUpdate):
     w = request.app.state.workbench
+    free = w.disk_free()
     return mutation(
         request,
         "updateSettings",
         dto.model_dump(mode="json"),
-        lambda conn: (200, w.update_settings(conn, dto, request.headers.get("If-Match"))),
+        lambda conn: (200, w.update_settings(conn, dto, request.headers.get("If-Match"), disk_free=free)),
     )
 
 
-@router.get("/api/status", operation_id="getStatus", response_model=Envelope[dict])
+@router.get("/api/status", operation_id="getStatus", response_model=Envelope[StatusDto])
 def status(request: Request):
     from app.observability.status import status_data
 
     return respond(request, status_data(request.app.state.workbench))
 
 
-@router.get("/api/usage", operation_id="getUsage", response_model=Envelope[dict])
+@router.get("/api/usage", operation_id="getUsage", response_model=Envelope[UsageDto])
 def usage(
     request: Request,
     from_: str = Query(alias="from"),

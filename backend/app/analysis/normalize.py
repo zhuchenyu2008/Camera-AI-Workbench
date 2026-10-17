@@ -68,6 +68,21 @@ def normalize(
     for output in outputs:
         for minute in output["minutes"]:
             review |= bool(minute["review_reasons"])
+            for evidence_id in minute["unresolved_evidence_ids"]:
+                if evidence_id in evidence:
+                    slot = timestamp(evidence[evidence_id]["captured_at"]) // 1000 * 1000
+                    anchors[(None, "unknown")].append(
+                        (
+                            slot,
+                            evidence_id,
+                            {
+                                "activity": "unknown",
+                                "labels": [],
+                                "object_ids": [],
+                                "observation": "模型明确无法判断此现场证据",
+                            },
+                        )
+                    )
             for observation in minute["observations"]:
                 review |= observation["needs_dense_review"] or observation["identity_status"] != "matched"
                 for evidence_id in set(

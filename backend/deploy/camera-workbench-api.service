@@ -1,0 +1,29 @@
+[Unit]
+Description=Camera AI Workbench API
+After=network-online.target camera-workbench-worker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=camera-workbench
+Group=camera-workbench
+WorkingDirectory=/opt/camera-workbench/backend
+EnvironmentFile=/etc/camera-ai-workbench/workbench.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/opt/camera-workbench/.venv/bin/python -m app.cli check-config
+ExecStart=/opt/camera-workbench/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/camera-ai-workbench
+UMask=0077
+MemoryHigh=256M
+MemoryMax=384M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

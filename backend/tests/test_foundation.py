@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from app.errors import AppError
-from app.repositories import schema_v1 as s
+from app.repositories import schema as s
 from app.schemas import CameraDto, SettingsConfig
 from app.timeutils import day_range, schedule_intervals, timestamp
 from app.worker.queue import enqueue
@@ -16,8 +16,11 @@ from tests.conftest import camera_payload
 def test_B01_beijing_week_wrap_and_union():
     a = timestamp("2026-10-18T23:00:00+08:00")
     b = timestamp("2026-10-19T02:00:00+08:00")
-    rules = [{"weekdays": [7], "start": "22:00", "end": "01:00", "end_day_offset": 1}, {"weekdays": [1], "start": "00:30", "end": "01:30", "end_day_offset": 0}]
-    assert schedule_intervals(rules, a, b) == [(a, a+150*60000)]
+    rules = [
+        {"weekdays": [7], "start": "22:00", "end": "01:00", "end_day_offset": 1},
+        {"weekdays": [1], "start": "00:30", "end": "01:30", "end_day_offset": 0},
+    ]
+    assert schedule_intervals(rules, a, b) == [(a, a + 150 * 60000)]
     assert day_range("2026-10-17") == (timestamp("2026-10-16T16:00:00Z"), timestamp("2026-10-17T16:00:00Z"))
     assert SettingsConfig().minimum_retention_seconds() == 1350
     with pytest.raises(ValueError):
@@ -37,14 +40,31 @@ def test_B09_auth_csrf_versions_and_idempotency(client, w):
     assert client.post("/api/cameras", json=payload, headers=headers).json()["data"] == camera
     assert client.post("/api/cameras", json=payload | {"name": "不同"}, headers=headers).status_code == 409
     path = f"/api/cameras/{camera['id']}"
-    assert client.patch(path, json={"name": "新名称"}, headers={"Idempotency-Key": "patch-missing"}).status_code == 428
-    changed = client.patch(path, json={"name": "新名称"}, headers={"Idempotency-Key": "patch-one", "If-Match": '"rev-1"'})
+    assert (
+        client.patch(path, json={"name": "新名称"}, headers={"Idempotency-Key": "patch-missing"}).status_code
+        == 428
+    )
+    changed = client.patch(
+        path, json={"name": "新名称"}, headers={"Idempotency-Key": "patch-one", "If-Match": '"rev-1"'}
+    )
     assert changed.status_code == 200, changed.text
     assert changed.headers["ETag"] == '"rev-2"'
-    assert client.patch(path, json={"name": "新名称"}, headers={"Idempotency-Key": "patch-one", "If-Match": '"rev-1"'}).json()["data"]["revision"] == 2
-    assert client.patch(path, json={"name": "又改名"}, headers={"Idempotency-Key": "patch-two", "If-Match": '"rev-1"'}).status_code == 412
+    assert (
+        client.patch(
+            path, json={"name": "新名称"}, headers={"Idempotency-Key": "patch-one", "If-Match": '"rev-1"'}
+        ).json()["data"]["revision"]
+        == 2
+    )
+    assert (
+        client.patch(
+            path, json={"name": "又改名"}, headers={"Idempotency-Key": "patch-two", "If-Match": '"rev-1"'}
+        ).status_code
+        == 412
+    )
     csrf = client.headers.pop("X-CSRF-Token")
-    assert client.post("/api/cameras", json=payload, headers={"Idempotency-Key": "no-csrf"}).status_code == 403
+    assert (
+        client.post("/api/cameras", json=payload, headers={"Idempotency-Key": "no-csrf"}).status_code == 403
+    )
     client.headers["X-CSRF-Token"] = csrf
     assert client.get(path).headers["Cache-Control"] == "private, no-store"
     client.delete("/api/session")
@@ -69,15 +89,25 @@ def test_B04_real_sqlite_competing_claims_and_late_result(w, clock):
         w.queue.finish(first)
     w.queue.finish(second)
     with w.db.read() as conn:
-        assert conn.execute(select(s.jobs.c.state).where(s.jobs.c.id == job["id"])).scalar_one() == "succeeded"
+        assert (
+            conn.execute(select(s.jobs.c.state).where(s.jobs.c.id == job["id"])).scalar_one() == "succeeded"
+        )
 
 
 def test_B11_routes_match_document(client):
-    from pathlib import Path
     import re
-    doc = (Path(__file__).resolve().parents[2]/"docs/04-后端详细设计与接口契约.md").read_text(encoding="utf-8")
+    from pathlib import Path
+
+    doc = (Path(__file__).resolve().parents[2] / "docs/04-后端详细设计与接口契约.md").read_text(
+        encoding="utf-8"
+    )
     rows = re.findall(r"^\| (\w+) \| (GET|POST|PATCH|PUT|DELETE) \| (/[^ ]+) \|", doc, re.M)
     schema = client.get("/openapi.json").json()
-    actual = {(v["operationId"], method.upper(), path) for path, methods in schema["paths"].items() for method, v in methods.items() if "operationId" in v}
+    actual = {
+        (v["operationId"], method.upper(), path)
+        for path, methods in schema["paths"].items()
+        for method, v in methods.items()
+        if "operationId" in v
+    }
     assert set(rows) == actual
     assert len({r[0] for r in actual}) == len(actual)

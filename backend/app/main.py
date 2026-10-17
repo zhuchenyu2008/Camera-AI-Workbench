@@ -23,6 +23,10 @@ def create_app(config: Config | None = None, workbench: Workbench | None = None)
     @asynccontextmanager
     async def lifespan(application):
         application.state.workbench = workbench or Workbench(config)
+        if workbench is None:
+            from app.observability.logging import configure_logging
+
+            configure_logging(config, "api")
         try:
             yield
         finally:
@@ -86,6 +90,13 @@ def create_app(config: Config | None = None, workbench: Workbench | None = None)
             response = await call_next(request)
         except AppError as exc:
             response = error_response(request, exc)
+        except Exception:
+            import logging
+
+            logging.getLogger("caw").error(
+                "request_failure request_id=%s code=INTERNAL_ERROR", request.state.request_id
+            )
+            response = error_response(request, AppError(500, "INTERNAL_ERROR", "请求处理失败"))
         response.headers["X-Request-ID"] = request.state.request_id
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -194,7 +205,9 @@ def create_app(config: Config | None = None, workbench: Workbench | None = None)
                                 "schema": {"type": "string", "pattern": '^"rev-[0-9]+"$'},
                             }
                         )
-                    operation.setdefault("parameters", []).extend(headers)
+                    parameters = operation.setdefault("parameters", [])
+                    present = {(p.get("name"), p.get("in")) for p in parameters}
+                    parameters.extend(p for p in headers if (p["name"], p["in"]) not in present)
         return result
 
     application.openapi = openapi

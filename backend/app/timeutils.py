@@ -56,6 +56,19 @@ def intersect(a: list[tuple[int, int]], b: list[tuple[int, int]]) -> list[tuple[
     return result
 
 
+def subtract(intervals: list[tuple[int, int]], removed: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    result = []
+    for start, end in union(intervals):
+        position = start
+        for a, b in intersect([(start, end)], removed):
+            if position < a:
+                result.append((position, a))
+            position = b
+        if position < end:
+            result.append((position, end))
+    return result
+
+
 def schedule_intervals(rules: list[dict], start: int, end: int) -> list[tuple[int, int]]:
     first = datetime.fromtimestamp(start / 1000, BEIJING).replace(
         hour=0, minute=0, second=0, microsecond=0
