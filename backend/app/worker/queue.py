@@ -35,7 +35,7 @@ def enqueue(
         return dict(existing)
     priority = (
         0
-        if kind in {"cleanup_assets", "apply_settings", "project_events"}
+        if kind in {"cleanup_assets", "apply_settings", "project_events", "exchange_rate_refresh"}
         else 10
         if kind in IMAGE_KINDS
         else 20
@@ -338,6 +338,13 @@ class Queue:
                     .where(s.providers.c.id == provider_id)
                     .values(paused=True, last_test_error=error.code)
                 )
+            elif job["kind"] == "exchange_rate_refresh":
+                delays = [60000, 300000, 900000]
+                failures = current["failure_count"] + 1
+                retry = error.retryable and failures <= len(delays)
+                wait = delays[failures - 1] if retry else 0
+                state = "queued" if retry else "failed"
+                reason = "retry_wait" if retry else None
             else:
                 settings = self.w.settings_config(conn)
                 attempts = current["failure_count"] + 1

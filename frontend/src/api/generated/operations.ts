@@ -371,6 +371,20 @@ export const operations = {
     "versioned": true,
     "binary": false
   },
+  "getExchangeRate": {
+    "method": "GET",
+    "path": "/api/billing/exchange-rate",
+    "idempotent": false,
+    "versioned": false,
+    "binary": false
+  },
+  "refreshExchangeRate": {
+    "method": "POST",
+    "path": "/api/billing/exchange-rate/refresh",
+    "idempotent": true,
+    "versioned": false,
+    "binary": false
+  },
   "testProvider": {
     "method": "POST",
     "path": "/api/providers/test",

@@ -32,6 +32,8 @@ from app.schemas import (
     EventDto,
     EventUpdateDto,
     EvidenceDto,
+    ExchangeRateDto,
+    ExchangeRateRefreshDto,
     ImpactPreviewDto,
     JobDto,
     ListEnvelope,
@@ -1201,6 +1203,84 @@ def update_provider_pricing(request: Request, provider_id: str, dto: ProviderPri
         dto.model_dump(mode="json"),
         lambda conn: (200, w.write_provider_pricing(conn, provider_id, dto, request.headers.get("If-Match"))),
     )
+
+
+@router.get(
+    "/api/billing/exchange-rate",
+    operation_id="getExchangeRate",
+    response_model=Envelope[ExchangeRateDto],
+)
+def get_exchange_rate(request: Request):
+    w = request.app.state.workbench
+    with w.db.read() as conn:
+        row = conn.execute(
+            select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny")
+        ).mappings().first()
+        has_usd = w.has_usd_pricing(conn)
+        if not row:
+            dto = ExchangeRateDto(
+                rate=None,
+                from_currency="USD",
+                to_currency="CNY",
+                rate_date=None,
+                fetched_at=None,
+                source="ECB",
+                is_valid=False,
+                status="missing",
+                has_usd_provider=has_usd,
+            )
+        else:
+            is_valid = w.is_rate_valid(row["rate_date"])
+            from app.timeutils import iso
+
+            dto = ExchangeRateDto(
+                rate=row["rate"],
+                from_currency=row["from_currency"],
+                to_currency=row["to_currency"],
+                rate_date=row["rate_date"],
+                fetched_at=iso(row["fetched_at_ms"]),
+                source=row["source"],
+                is_valid=is_valid,
+                status="valid" if is_valid else "expired",
+                has_usd_provider=has_usd,
+            )
+        return respond(request, dto.model_dump(mode="json"))
+
+
+@router.post(
+    "/api/billing/exchange-rate/refresh",
+    operation_id="refreshExchangeRate",
+    response_model=Envelope[ExchangeRateRefreshDto],
+)
+def refresh_exchange_rate(request: Request):
+    w = request.app.state.workbench
+
+    def apply(conn):
+        active = conn.execute(
+            select(s.jobs).where(
+                s.jobs.c.kind == "exchange_rate_refresh",
+                s.jobs.c.state.in_(["queued", "running"]),
+            )
+        ).mappings().first()
+        if active:
+            return 200, ExchangeRateRefreshDto(
+                job_id=active["id"],
+                status="already_running" if active["state"] == "running" else "queued",
+            ).model_dump(mode="json")
+        job = enqueue(
+            conn,
+            w.now(),
+            "exchange_rate_refresh",
+            {"trigger": "manual"},
+            f"exchange_rate_manual:{w.now()}",
+            total=1,
+        )
+        return 200, ExchangeRateRefreshDto(
+            job_id=job["id"],
+            status="queued",
+        ).model_dump(mode="json")
+
+    return mutation(request, "refreshExchangeRate", {}, apply)
 
 
 @router.post(

@@ -28,6 +28,8 @@ export type Envelope_EntityDto_ = { "data": EntityDto; "meta": Meta; };
 export type Envelope_EventDto_ = { "data": EventDto; "meta": Meta; };
 export type Envelope_EventUpdateDto_ = { "data": EventUpdateDto; "meta": Meta; };
 export type Envelope_EvidenceDto_ = { "data": EvidenceDto; "meta": Meta; };
+export type Envelope_ExchangeRateDto_ = { "data": ExchangeRateDto; "meta": Meta; };
+export type Envelope_ExchangeRateRefreshDto_ = { "data": ExchangeRateRefreshDto; "meta": Meta; };
 export type Envelope_ImpactPreviewDto_ = { "data": ImpactPreviewDto; "meta": Meta; };
 export type Envelope_JobDto_ = { "data": JobDto; "meta": Meta; };
 export type Envelope_MinuteDto_ = { "data": MinuteDto; "meta": Meta; };
@@ -49,6 +51,8 @@ export type EventCorrection = { "base_source_revision": number; "intervals": Arr
 export type EventDto = { "id": string; "revision": number; "source_revision": number; "subject_id": (string | null); "identity_status": "matched" | "possible" | "unknown"; "camera_ids": Array<string>; "activity": "reading" | "writing" | "computer" | "phone" | "away" | "resting" | "other" | "unknown"; "labels": Array<string>; "object_ids": Array<string>; "start_at": string; "end_at": string; "duration_ms": number; "segments": Array<SegmentDto>; "interruptions": Array<{ [key: string]: unknown; }>; "minute_refs": Array<{ [key: string]: unknown; }>; "evidence_state": "available" | "partial" | "expired" | "evicted" | "missing" | "none"; "source_state": "current" | "stale"; "has_manual_revision": boolean; "replacement_event_ids": Array<string>; };
 export type EventUpdateDto = { "event": EventDto; "projection_revision": number; "affected_summary_ids": Array<string>; "jobs": Array<JobDto>; };
 export type EvidenceDto = { "id": string; "camera_id": string; "captured_at": string; "expires_at": string; "state": "available" | "partial" | "expired" | "evicted" | "missing" | "none"; "width": (number | null); "height": (number | null); "content_url": (string | null); "reason": (string | null); };
+export type ExchangeRateDto = { "rate": (string | null); "from_currency"?: string; "to_currency"?: string; "rate_date": (string | null); "fetched_at": (string | null); "source": (string | null); "is_valid": boolean; "status": "valid" | "expired" | "missing"; "has_usd_provider"?: boolean; };
+export type ExchangeRateRefreshDto = { "job_id": string; "status": "queued" | "already_running"; };
 export type FieldError = { "path": string; "code": string; "message": string; };
 export type ImpactPreviewDto = { "preview_token": string; "expires_at": string; "affected_camera_ids": Array<string>; "will_expire_frame_count": number; "will_expire_bytes": number; "estimated_media_bytes": { [key: string]: unknown; }; "requires_reconnect": boolean; "requires_roi_review": boolean; "warnings": Array<WarningDto>; "blocking_errors": Array<{ [key: string]: unknown; }>; };
 export type JobDto = { "id": string; "kind": string; "job_state": "queued" | "running" | "succeeded" | "partial" | "failed" | "expired" | "cancelled"; "queue_reason": ("scheduled" | "retry_wait" | "dependency" | "capacity" | "provider_paused" | null); "phase": string; "created_at": string; "started_at": (string | null); "finished_at": (string | null); "progress": Progress; "attempts": number; "cancel_requested": boolean; "deadline_at": (string | null); "error": ({ [key: string]: unknown; } | null); "result_links": Array<{ [key: string]: unknown; }>; };
@@ -156,6 +160,8 @@ export interface Operations {
   deleteProvider: { method: "DELETE"; path: "/api/providers/{provider_id}"; body: void; response: void; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; "If-Match": string; }; path: { "provider_id": string; }; } };
   getProviderPricing: { method: "GET"; path: "/api/providers/{provider_id}/pricing"; body: void; response: Envelope_ProviderPricingDto_; parameters: { path: { "provider_id": string; }; } };
   updateProviderPricing: { method: "PUT"; path: "/api/providers/{provider_id}/pricing"; body: ProviderPricingWrite; response: Envelope_ProviderPricingDto_; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; "If-Match": string; }; path: { "provider_id": string; }; } };
+  getExchangeRate: { method: "GET"; path: "/api/billing/exchange-rate"; body: void; response: Envelope_ExchangeRateDto_; parameters: {  } };
+  refreshExchangeRate: { method: "POST"; path: "/api/billing/exchange-rate/refresh"; body: void; response: Envelope_ExchangeRateRefreshDto_; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; }; } };
   testProvider: { method: "POST"; path: "/api/providers/test"; body: ProviderTest; response: Envelope_JobDto_; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; }; } };
   getSettings: { method: "GET"; path: "/api/settings"; body: void; response: Envelope_SettingsDto_; parameters: {  } };
   updateSettings: { method: "PATCH"; path: "/api/settings"; body: SettingsUpdate; response: Envelope_SettingsUpdateDto_; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; "If-Match": string; }; } };

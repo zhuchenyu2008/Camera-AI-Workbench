@@ -969,6 +969,12 @@ class ExchangeRateDto(Strict):
     source: str | None
     is_valid: bool
     status: Literal["valid", "expired", "missing"]
+    has_usd_provider: bool = False
+
+
+class ExchangeRateRefreshDto(Strict):
+    job_id: str
+    status: Literal["queued", "already_running"]
 
 
 class UsageDto(Strict):

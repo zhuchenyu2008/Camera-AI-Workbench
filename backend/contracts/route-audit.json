@@ -143,6 +143,16 @@
       "idempotency_required": false
     },
     {
+      "operation_id": "getExchangeRate",
+      "method": "GET",
+      "path": "/api/billing/exchange-rate",
+      "success": [
+        "200"
+      ],
+      "version_required": false,
+      "idempotency_required": false
+    },
+    {
       "operation_id": "getHealth",
       "method": "GET",
       "path": "/health/live",
@@ -433,6 +443,16 @@
       "idempotency_required": true
     },
     {
+      "operation_id": "refreshExchangeRate",
+      "method": "POST",
+      "path": "/api/billing/exchange-rate/refresh",
+      "success": [
+        "200"
+      ],
+      "version_required": false,
+      "idempotency_required": true
+    },
+    {
       "operation_id": "regenerateSummary",
       "method": "POST",
       "path": "/api/summaries/regenerate",
@@ -593,5 +613,5 @@
       "idempotency_required": true
     }
   ],
-  "matched_document_routes": 59
+  "matched_document_routes": 61
 }

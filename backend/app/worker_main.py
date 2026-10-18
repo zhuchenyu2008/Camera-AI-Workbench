@@ -87,6 +87,20 @@ class Worker:
         with self.w.db.write() as conn:
             Analysis(self.w).schedule(conn)
             Summaries(self.w).schedule(conn)
+            self.schedule_exchange_rate(conn)
+
+    def schedule_exchange_rate(self, conn):
+        if not self.w.has_usd_pricing(conn):
+            return
+        from datetime import datetime
+        from app.timeutils import BEIJING
+        from app.worker.queue import enqueue
+
+        now_dt = datetime.fromtimestamp(self.w.now() / 1000, tz=BEIJING)
+        if now_dt.hour == 23 and now_dt.minute == 15:
+            local_date = now_dt.strftime("%Y-%m-%d")
+            dedup = f"exchange_rate_daily:{local_date}"
+            enqueue(conn, self.w.now(), "exchange_rate_refresh", {"trigger": "daily"}, dedup)
 
     async def heartbeat_loop(self):
         while not self.stop.is_set():
@@ -145,6 +159,16 @@ class Worker:
                     stream_session_id=None, capture_state="stopped", density_state=None
                 )
             )
+            if self.w.has_usd_pricing(conn) and not self.w.has_valid_rate(conn):
+                from app.worker.queue import enqueue
+
+                enqueue(
+                    conn,
+                    self.w.now(),
+                    "exchange_rate_refresh",
+                    {"trigger": "startup"},
+                    f"exchange_rate_startup:{self.w.now()}",
+                )
         background = [
             asyncio.create_task(fn())
             for fn in (self.heartbeat_loop, self.capture_loop, self.cleanup_loop, self.scheduler_loop)

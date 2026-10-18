@@ -859,6 +859,18 @@ class Workbench:
                     )
         return self.provider_pricing(conn, provider_id)
 
+    def has_usd_pricing(self, conn) -> bool:
+        count = conn.execute(
+            select(func.count()).select_from(s.provider_pricing).where(s.provider_pricing.c.currency == "USD")
+        ).scalar_one()
+        return count > 0
+
+    def has_valid_rate(self, conn) -> bool:
+        row = conn.execute(
+            select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny")
+        ).mappings().first()
+        return bool(row and self.is_rate_valid(row["rate_date"]))
+
     def is_rate_valid(self, rate_date_str: str | None) -> bool:
         if not rate_date_str:
             return False
@@ -868,7 +880,7 @@ class Workbench:
             rate_d = date.fromisoformat(rate_date_str)
             curr_d = datetime.fromtimestamp(self.now() / 1000, BEIJING).date()
             diff = (curr_d - rate_d).days
-            return 0 <= diff <= 7
+            return -1 <= diff <= 7
         except Exception:
             return False
 

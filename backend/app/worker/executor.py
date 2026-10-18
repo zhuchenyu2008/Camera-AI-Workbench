@@ -57,6 +57,8 @@ class Executor:
                     await asyncio.to_thread(reproject, self.w, job["payload_json"].get("patch", {}))
                     await self.supervisor.tick()
                 await asyncio.to_thread(self.w.queue.finish, job)
+            elif kind == "exchange_rate_refresh":
+                await self.exchange_rate_refresh(job)
             else:
                 raise AppError(422, "UNKNOWN_JOB_KIND", "任务类型不受支持")
         except AppError as exc:
@@ -326,3 +328,10 @@ class Executor:
                 summary = one(conn, s.summaries, summary_id)
                 context = Summaries(self.w).context(conn, summary)
                 Summaries(self.w).commit(conn, summary, context, None, error.code)
+
+    async def exchange_rate_refresh(self, job):
+        from app.services.exchange_rate import ExchangeRateService
+
+        service = ExchangeRateService(self.w)
+        result = await service.refresh(job)
+        await asyncio.to_thread(self.w.queue.finish, job, result=result)
