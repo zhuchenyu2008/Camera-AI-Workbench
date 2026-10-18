@@ -61,6 +61,7 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
     settings = useApi("getSettings");
   const [base, setBase] = useState(camera),
     [name, setName] = useState(camera?.name ?? ""),
+    [host, setHost] = useState(String(camera?.source.host ?? "127.0.0.1")),
     [port, setPort] = useState(Number(camera?.source.port ?? 15554)),
     [path, setPath] = useState(String(camera?.source.path ?? "/live")),
     [username, setUsername] = useState(String(camera?.source.username ?? "")),
@@ -84,6 +85,7 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
   const action = useAction<unknown>();
   const draft = {
     name,
+    host,
     port,
     path,
     username,
@@ -96,6 +98,7 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
   };
   const original = {
     name: base?.name ?? "",
+    host: String(base?.source.host ?? "127.0.0.1"),
     port: Number(base?.source.port ?? 15554),
     path: String(base?.source.path ?? "/live"),
     username: String(base?.source.username ?? ""),
@@ -112,6 +115,7 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
     if (camera && base && !dirty && camera.revision !== base.revision) {
       setBase(camera);
       setName(camera.name);
+      setHost(String(camera.source.host));
       setPort(Number(camera.source.port));
       setPath(String(camera.source.path));
       setUsername(String(camera.source.username ?? ""));
@@ -147,6 +151,7 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
   const patch = (): CameraPatch => {
     const sourceChanged =
       !base ||
+      host !== base.source.host ||
       port !== base.source.port ||
       path !== base.source.path ||
       username !== base.source.username ||
@@ -157,7 +162,7 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
       ...(sourceChanged
         ? {
             source: {
-              host: "127.0.0.1",
+              host,
               port,
               path,
               username,
@@ -255,7 +260,7 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
               const body: CameraCreate = {
                 name,
                 source: {
-                  host: "127.0.0.1",
+                  host,
                   port,
                   path,
                   username,
@@ -298,11 +303,17 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
                 onChange={(e) => setName(e.target.value)}
               />
             </Field>
-            <Field label="Visitor 主机">
-              <input readOnly value="127.0.0.1" />
+            <Field label="RTSP 主机" hint="填写已加入后端允许清单的 IPv4 地址。">
+              <input
+                name="source.host"
+                required
+                maxLength={15}
+                value={host}
+                onChange={(e) => setHost(e.target.value)}
+              />
             </Field>
             <Field
-              label="允许的本机端口"
+              label="RTSP 端口"
               hint="端口须已在部署白名单中配置，例如 15554。"
             >
               <input

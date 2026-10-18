@@ -186,7 +186,7 @@ class Worker:
             await self.client.close()
 
 
-def main():
+def main(*, stop_file=None):
     config = Config.from_env()
     config.prepare()
     with ProcessLock(config.data_dir / "worker.lock"):
@@ -199,12 +199,26 @@ def main():
             loop = asyncio.get_running_loop()
             loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=6))
             worker = Worker(w)
+
+            async def watch_local_stop():
+                while not worker.stop.is_set():
+                    if stop_file.exists():
+                        worker.stop.set()
+                        return
+                    await worker.wait(0.5)
+
             for signum in (signal.SIGINT, signal.SIGTERM):
                 try:
                     loop.add_signal_handler(signum, worker.stop.set)
                 except (NotImplementedError, RuntimeError):
                     signal.signal(signum, lambda *_: loop.call_soon_threadsafe(worker.stop.set))
-            await worker.run()
+            watcher = asyncio.create_task(watch_local_stop()) if stop_file is not None else None
+            try:
+                await worker.run()
+            finally:
+                if watcher:
+                    watcher.cancel()
+                    await asyncio.gather(watcher, return_exceptions=True)
 
         try:
             asyncio.run(run())

@@ -80,8 +80,8 @@ def main():
                 required = {"-encoders": "mjpeg", "-muxers": "hls", "-filters": "select"}[capability]
                 if required not in text:
                     parser.error("FFmpeg 缺少所需能力")
-            if not config.rtsp_allowed_ports:
-                parser.error("缺少 RTSP 端口白名单")
+            if not config.rtsp_allowed_ports or not config.rtsp_allowed_hosts:
+                parser.error("缺少 RTSP 主机或端口白名单")
             probe = config.data_dir / "tmp" / "write-check.part"
             probe.write_bytes(b"check")
             probe.unlink()

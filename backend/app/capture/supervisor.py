@@ -102,6 +102,7 @@ class Supervisor:
         self.tick_lock = asyncio.Lock()
 
     async def start(self, camera):
+        self.w.validate_source(camera["config_json"]["source"])
         camera_id = camera["id"]
         sid = new_id("stream")
         output = safe_path(self.w.config.data_dir, f"hls/{sid}")
@@ -486,6 +487,7 @@ class Supervisor:
                     }
                 raise AppError(503, "PREVIEW_UNAVAILABLE", "现有管道未取得新帧", retryable=True)
             # 离线测试单独复用同一 FFmpeg 参数，只处理首张真实图，不写分钟活动。
+            self.w.validate_source(camera["config_json"]["source"])
             sid = new_id("stream")
             directory = safe_path(self.w.config.data_dir, f"hls/{sid}")
             directory.mkdir()

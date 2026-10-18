@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from ipaddress import IPv4Address
 from typing import Annotated, Generic, Literal, TypeVar
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -99,12 +100,17 @@ class ScheduleRule(Strict):
 
 
 class Source(Strict):
-    host: Literal["127.0.0.1"] = "127.0.0.1"
+    host: Annotated[str, Field(min_length=7, max_length=15)] = "127.0.0.1"
     port: Annotated[int, Field(ge=1, le=65535)]
     path: Annotated[str, Field(min_length=1, max_length=2048)]
     username: Annotated[str, Field(max_length=128)] = ""
     password: Annotated[str, Field(min_length=1, max_length=256)] | None = None
     credential_action: Literal["keep", "clear"] = "keep"
+
+    @field_validator("host")
+    @classmethod
+    def ipv4_only(cls, value):
+        return str(IPv4Address(value))
 
     @field_validator("path")
     @classmethod
@@ -123,12 +129,17 @@ class Source(Strict):
 
 
 class SourcePatch(Strict):
-    host: Literal["127.0.0.1"] | None = None
+    host: Annotated[str, Field(min_length=7, max_length=15)] | None = None
     port: Annotated[int, Field(ge=1, le=65535)] | None = None
     path: Annotated[str, Field(min_length=1, max_length=2048)] | None = None
     username: Annotated[str, Field(max_length=128)] | None = None
     password: Annotated[str, Field(min_length=1, max_length=256)] | None = None
     credential_action: Literal["keep", "clear"] = "keep"
+
+    @field_validator("host")
+    @classmethod
+    def ipv4_only(cls, value):
+        return Source.ipv4_only(value) if value is not None else value
 
     @model_validator(mode="after")
     def non_null(self):
