@@ -41,7 +41,12 @@ const outputs = {
     "// 自动生成自 OpenAPI 字段约束；请勿手工编辑。\nexport const fields = " +
     JSON.stringify(
       Object.fromEntries(
-        ["SettingsConfig", "ProviderWrite"].map((k) => [
+        [
+          "SettingsConfig",
+          "ProviderWrite",
+          "ProviderPricingConfig",
+          "ProviderPricingWrite",
+        ].map((k) => [
           k,
           schema.components.schemas[k].properties,
         ]),

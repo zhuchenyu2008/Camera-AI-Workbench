@@ -203,6 +203,16 @@
       "idempotency_required": false
     },
     {
+      "operation_id": "getProviderPricing",
+      "method": "GET",
+      "path": "/api/providers/{provider_id}/pricing",
+      "success": [
+        "200"
+      ],
+      "version_required": false,
+      "idempotency_required": false
+    },
+    {
       "operation_id": "getReferenceContent",
       "method": "GET",
       "path": "/api/reference-assets/{asset_id}/content",
@@ -543,6 +553,16 @@
       "idempotency_required": true
     },
     {
+      "operation_id": "updateProviderPricing",
+      "method": "PUT",
+      "path": "/api/providers/{provider_id}/pricing",
+      "success": [
+        "200"
+      ],
+      "version_required": true,
+      "idempotency_required": true
+    },
+    {
       "operation_id": "updateReference",
       "method": "PATCH",
       "path": "/api/reference-assets/{asset_id}",
@@ -573,5 +593,5 @@
       "idempotency_required": true
     }
   ],
-  "matched_document_routes": 57
+  "matched_document_routes": 59
 }

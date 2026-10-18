@@ -14,7 +14,7 @@ from app.repositories import schema as s
 from app.schemas import SettingsConfig
 from app.timeutils import now_ms
 
-SCHEMA_VERSION = "0003"
+SCHEMA_VERSION = "0004"
 
 
 def new_id(prefix: str) -> str:

@@ -9602,6 +9602,369 @@
         ]
       }
     },
+    "/api/providers/{provider_id}/pricing": {
+      "get": {
+        "summary": "Get Provider Pricing",
+        "operationId": "getProviderPricing",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ProviderPricingDto_"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      },
+      "put": {
+        "summary": "Update Provider Pricing",
+        "operationId": "updateProviderPricing",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\"rev-[0-9]+\"$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderPricingWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ProviderPricingDto_"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/providers/test": {
       "post": {
         "summary": "Test Provider",
@@ -12173,6 +12536,23 @@
         ],
         "title": "Envelope[ProviderDto]"
       },
+      "Envelope_ProviderPricingDto_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProviderPricingDto"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "Envelope[ProviderPricingDto]"
+      },
       "Envelope_ReferenceDto_": {
         "properties": {
           "data": {
@@ -13838,6 +14218,217 @@
         ],
         "title": "ProviderDto"
       },
+      "ProviderPricingConfig": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CNY",
+              "USD"
+            ],
+            "title": "Currency"
+          },
+          "input_price": {
+            "type": "string",
+            "title": "Input Price"
+          },
+          "output_price": {
+            "type": "string",
+            "title": "Output Price"
+          },
+          "cached_input_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached Input Price"
+          },
+          "source_note": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Source Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "currency",
+          "input_price",
+          "output_price",
+          "source_note"
+        ],
+        "title": "ProviderPricingConfig"
+      },
+      "ProviderPricingDto": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "pricing_revision": {
+            "type": "integer",
+            "title": "Pricing Revision"
+          },
+          "provider_revision": {
+            "type": "integer",
+            "title": "Provider Revision"
+          },
+          "applicable": {
+            "type": "boolean",
+            "title": "Applicable"
+          },
+          "price_configured": {
+            "type": "boolean",
+            "title": "Price Configured"
+          },
+          "pricing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderPricingConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bound_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bound Base Url"
+          },
+          "bound_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bound Model"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider_id",
+          "pricing_revision",
+          "provider_revision",
+          "applicable",
+          "price_configured"
+        ],
+        "title": "ProviderPricingDto"
+      },
+      "ProviderPricingWrite": {
+        "properties": {
+          "provider_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Provider Revision"
+          },
+          "pricing_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Pricing Revision"
+          },
+          "clear": {
+            "type": "boolean",
+            "title": "Clear",
+            "default": false
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "CNY",
+                  "USD"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "input_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price"
+          },
+          "output_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price"
+          },
+          "cached_input_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached Input Price"
+          },
+          "source_note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider_revision",
+          "pricing_revision"
+        ],
+        "title": "ProviderPricingWrite"
+      },
       "ProviderTest": {
         "properties": {
           "provider_id": {
@@ -15338,6 +15929,9 @@
             "type": "boolean",
             "title": "Cost Estimated"
           },
+          "cost_summary": {
+            "$ref": "#/components/schemas/UsageCostSummary"
+          },
           "key": {
             "type": "string",
             "title": "Key"
@@ -15358,9 +15952,88 @@
           "cost",
           "currency",
           "cost_estimated",
+          "cost_summary",
           "key"
         ],
         "title": "UsageBucket"
+      },
+      "UsageCostSummary": {
+        "properties": {
+          "estimated_cny_subtotal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cny Subtotal"
+          },
+          "by_currency": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "By Currency"
+          },
+          "converted_requests": {
+            "type": "integer",
+            "title": "Converted Requests"
+          },
+          "unpriced_requests": {
+            "type": "integer",
+            "title": "Unpriced Requests"
+          },
+          "unconverted_requests": {
+            "type": "integer",
+            "title": "Unconverted Requests"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "applicable_price_revisions": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Applicable Price Revisions"
+          },
+          "exchange_rate_dates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Exchange Rate Dates"
+          },
+          "completeness": {
+            "type": "string",
+            "enum": [
+              "full",
+              "partial",
+              "none"
+            ],
+            "title": "Completeness"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "estimated_cny_subtotal",
+          "by_currency",
+          "converted_requests",
+          "unpriced_requests",
+          "unconverted_requests",
+          "reasons",
+          "applicable_price_revisions",
+          "exchange_rate_dates",
+          "completeness"
+        ],
+        "title": "UsageCostSummary"
       },
       "UsageDto": {
         "properties": {
@@ -15466,6 +16139,9 @@
           "cost_estimated": {
             "type": "boolean",
             "title": "Cost Estimated"
+          },
+          "cost_summary": {
+            "$ref": "#/components/schemas/UsageCostSummary"
           }
         },
         "additionalProperties": false,
@@ -15482,7 +16158,8 @@
           "cached_tokens",
           "cost",
           "currency",
-          "cost_estimated"
+          "cost_estimated",
+          "cost_summary"
         ],
         "title": "UsageTotal"
       },

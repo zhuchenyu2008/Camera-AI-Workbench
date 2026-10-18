@@ -10,16 +10,27 @@ import ssl
 import time
 from datetime import timezone
 
+from decimal import Decimal
+
 import httpcore
 import httpx
 from pydantic import ValidationError
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.errors import AppError
 from app.repositories import schema as s
 from app.repositories.db import new_id
 from app.security.secrets import canonical, digest
 from app.timeutils import timestamp
+
+def format_cost(val: Decimal) -> str:
+    text = f"{val:f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+        if text == "":
+            text = "0"
+    return text
+
 
 PROMPT_VERSION = "visual-v1"
 VISUAL_PROMPT = """你只根据现场图片描述可观察活动。参考图片只用于命名，不证明现场存在。
@@ -145,6 +156,12 @@ class AIClient:
         ):
             raise AppError(422, "REFERENCE_CAPACITY_EXCEEDED", "完整序列化模型请求超过容量限制")
         attempt_id = new_id("attempt")
+        price_snapshot = None
+        rate_snapshot = None
+        initial_cost_status = "unpriced"
+        initial_cost_reason = None
+        pricing_revision = None
+
         with self.w.db.write() as conn:
             current = self.w.queue.guard(conn, job)
             attempt = current["attempt_count"] + 1
@@ -160,6 +177,50 @@ class AIClient:
                     state="running",
                 )
             )
+            pricing_row = conn.execute(
+                select(s.provider_pricing).where(s.provider_pricing.c.provider_id == provider["id"])
+            ).mappings().first()
+            applicable = (
+                pricing_row is not None
+                and pricing_row["currency"] is not None
+                and pricing_row["base_url"] == provider["config_json"]["base_url"]
+                and pricing_row["model"] == provider["config_json"]["model"]
+            )
+            if applicable:
+                pricing_revision = pricing_row["revision"]
+                price_snapshot = {
+                    "pricing_revision": pricing_row["revision"],
+                    "currency": pricing_row["currency"],
+                    "input_price": pricing_row["input_price"],
+                    "output_price": pricing_row["output_price"],
+                    "cached_input_price": pricing_row["cached_input_price"],
+                    "source_note": pricing_row["source_note"],
+                    "base_url": pricing_row["base_url"],
+                    "model": pricing_row["model"],
+                }
+                if pricing_row["currency"] == "USD":
+                    rate_row = conn.execute(
+                        select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny")
+                    ).mappings().first()
+                    if rate_row and self.w.is_rate_valid(rate_row["rate_date"]):
+                        rate_snapshot = {
+                            "rate": rate_row["rate"],
+                            "rate_date": rate_row["rate_date"],
+                            "from_currency": rate_row["from_currency"],
+                            "to_currency": rate_row["to_currency"],
+                            "source": rate_row["source"],
+                        }
+                    else:
+                        initial_cost_reason = (
+                            "missing_exchange_rate" if not rate_row else "expired_exchange_rate"
+                        )
+            else:
+                initial_cost_reason = (
+                    "missing_pricing"
+                    if (not pricing_row or not pricing_row["currency"])
+                    else "pricing_mismatch"
+                )
+
             conn.execute(
                 s.ai_usage.insert().values(
                     attempt_id=attempt_id,
@@ -172,6 +233,11 @@ class AIClient:
                     billing_status="unknown",
                     created_at_ms=self.w.now(),
                     state="running",
+                    pricing_revision=pricing_revision,
+                    price_snapshot_json=price_snapshot,
+                    exchange_rate_snapshot_json=rate_snapshot,
+                    cost_status=initial_cost_status,
+                    cost_reason=initial_cost_reason,
                 )
             )
         headers = {"Content-Type": "application/json"}
@@ -235,10 +301,79 @@ class AIClient:
 
             def token(name):
                 value = usage.get(name)
-                return value if isinstance(value, int) and value >= 0 else None
+                return (
+                    value
+                    if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+                    else None
+                )
+
+            p_tokens = token("prompt_tokens")
+            c_tokens = token("completion_tokens")
 
             details = usage.get("prompt_tokens_details") or {}
-            cached = details.get("cached_tokens") if isinstance(details, dict) else None
+            cached_val = details.get("cached_tokens") if isinstance(details, dict) else None
+            cached = None
+            invalid_cached = False
+            if cached_val is not None:
+                if isinstance(cached_val, bool) or not isinstance(cached_val, int) or cached_val < 0:
+                    invalid_cached = True
+                elif p_tokens is not None and cached_val > p_tokens:
+                    invalid_cached = True
+                else:
+                    cached = cached_val
+
+            estimated_cost = None
+            estimated_cost_cny = None
+            final_cost_status = "unpriced"
+            final_cost_reason = None
+
+            if p_tokens is None or c_tokens is None:
+                final_cost_status = "unpriced"
+                final_cost_reason = "missing_usage"
+            elif invalid_cached:
+                final_cost_status = "unpriced"
+                final_cost_reason = "invalid_cache_tokens"
+            elif not price_snapshot:
+                final_cost_status = "unpriced"
+                final_cost_reason = initial_cost_reason or "missing_pricing"
+            else:
+                inp_price = Decimal(price_snapshot["input_price"])
+                out_price = Decimal(price_snapshot["output_price"])
+                cached_price = (
+                    Decimal(price_snapshot["cached_input_price"])
+                    if price_snapshot.get("cached_input_price") is not None
+                    else None
+                )
+
+                if cached_price is not None and cached_price != inp_price:
+                    if cached is None:
+                        final_cost_status = "unpriced"
+                        final_cost_reason = "missing_cache_tokens"
+                    else:
+                        non_cached = p_tokens - cached
+                        cost = (
+                            Decimal(non_cached) * inp_price
+                            + Decimal(cached) * cached_price
+                            + Decimal(c_tokens) * out_price
+                        ) / Decimal(1_000_000)
+                        estimated_cost = format_cost(cost)
+                else:
+                    cost = (Decimal(p_tokens) * inp_price + Decimal(c_tokens) * out_price) / Decimal(1_000_000)
+                    estimated_cost = format_cost(cost)
+
+                if estimated_cost is not None:
+                    if price_snapshot["currency"] == "CNY":
+                        estimated_cost_cny = estimated_cost
+                        final_cost_status = "converted"
+                    else:
+                        if rate_snapshot and rate_snapshot.get("rate"):
+                            cny = Decimal(estimated_cost) * Decimal(rate_snapshot["rate"])
+                            estimated_cost_cny = format_cost(cny)
+                            final_cost_status = "converted"
+                        else:
+                            final_cost_status = "unconverted"
+                            final_cost_reason = initial_cost_reason or "missing_exchange_rate"
+
             with self.w.db.write() as conn:
                 conn.execute(
                     update(s.job_attempts)
@@ -254,14 +389,18 @@ class AIClient:
                     update(s.ai_usage)
                     .where(s.ai_usage.c.attempt_id == attempt_id)
                     .values(
-                        input_tokens=token("prompt_tokens"),
-                        output_tokens=token("completion_tokens"),
-                        cached_tokens=cached if isinstance(cached, int) and cached >= 0 else None,
+                        input_tokens=p_tokens,
+                        output_tokens=c_tokens,
+                        cached_tokens=cached,
                         latency_ms=int((time.monotonic() - started) * 1000),
                         billing_status="reported"
-                        if token("prompt_tokens") is not None and token("completion_tokens") is not None
+                        if p_tokens is not None and c_tokens is not None
                         else "unknown",
                         state=outcome,
+                        estimated_cost=estimated_cost,
+                        estimated_cost_cny=estimated_cost_cny,
+                        cost_status=final_cost_status,
+                        cost_reason=final_cost_reason,
                     )
                 )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal
 from ipaddress import IPv4Address
 from typing import Annotated, Generic, Literal, TypeVar
 
@@ -422,6 +423,80 @@ class ProviderDto(Strict):
     tested_config_revision: int | None
     tested_at: AwareDatetime | None
     last_test_error: str | None = None
+
+
+PricingCurrency = Literal["CNY", "USD"]
+
+
+class ProviderPricingConfig(Strict):
+    currency: PricingCurrency
+    input_price: str
+    output_price: str
+    cached_input_price: str | None = None
+    source_note: Annotated[str, Field(min_length=1, max_length=500)]
+
+    @model_validator(mode="after")
+    def validate_prices(self):
+        def check_price(val: str, name: str):
+            try:
+                d = Decimal(val)
+            except Exception:
+                raise ValueError(f"{name} 必须为合法的十进制数值")
+            if not d.is_finite() or d < 0:
+                raise ValueError(f"{name} 不得为负数或非有限数值")
+            if d.as_tuple().exponent < -6:
+                raise ValueError(f"{name} 小数位不得超过 6 位")
+
+        check_price(self.input_price, "input_price")
+        check_price(self.output_price, "output_price")
+        if self.cached_input_price is not None:
+            check_price(self.cached_input_price, "cached_input_price")
+        return self
+
+
+class ProviderPricingWrite(Strict):
+    provider_revision: Annotated[int, Field(ge=1)]
+    pricing_revision: Annotated[int, Field(ge=1)]
+    clear: bool = False
+    currency: PricingCurrency | None = None
+    input_price: str | None = None
+    output_price: str | None = None
+    cached_input_price: str | None = None
+    source_note: Annotated[str, Field(min_length=1, max_length=500)] | None = None
+
+    @model_validator(mode="after")
+    def validate_pricing_write(self):
+        if not self.clear:
+            if not self.currency or self.input_price is None or self.output_price is None or not self.source_note:
+                raise ValueError("设置价格时必须提供币种、普通输入单价、输出单价和来源说明")
+
+            def check_price(val: str, name: str):
+                try:
+                    d = Decimal(val)
+                except Exception:
+                    raise ValueError(f"{name} 必须为合法的十进制数值")
+                if not d.is_finite() or d < 0:
+                    raise ValueError(f"{name} 不得为负数或非有限数值")
+                if d.as_tuple().exponent < -6:
+                    raise ValueError(f"{name} 小数位不得超过 6 位")
+
+            check_price(self.input_price, "input_price")
+            check_price(self.output_price, "output_price")
+            if self.cached_input_price is not None:
+                check_price(self.cached_input_price, "cached_input_price")
+        return self
+
+
+class ProviderPricingDto(Strict):
+    provider_id: str
+    pricing_revision: int
+    provider_revision: int
+    applicable: bool
+    price_configured: bool
+    pricing: ProviderPricingConfig | None = None
+    bound_base_url: str | None = None
+    bound_model: str | None = None
+    updated_at: AwareDatetime | None = None
 
 
 class SettingsConfig(Strict):
@@ -853,6 +928,18 @@ class TokenTotal(Strict):
     unknown_count: int
 
 
+class UsageCostSummary(Strict):
+    estimated_cny_subtotal: str | None
+    by_currency: dict[str, str]
+    converted_requests: int
+    unpriced_requests: int
+    unconverted_requests: int
+    reasons: list[str]
+    applicable_price_revisions: list[int]
+    exchange_rate_dates: list[str]
+    completeness: Literal["full", "partial", "none"]
+
+
 class UsageTotal(Strict):
     requests: int
     succeeded: int
@@ -866,10 +953,22 @@ class UsageTotal(Strict):
     cost: str | None
     currency: str | None
     cost_estimated: bool
+    cost_summary: UsageCostSummary
 
 
 class UsageBucket(UsageTotal):
     key: str
+
+
+class ExchangeRateDto(Strict):
+    rate: str | None
+    from_currency: str = "USD"
+    to_currency: str = "CNY"
+    rate_date: str | None
+    fetched_at: AwareDatetime | None
+    source: str | None
+    is_valid: bool
+    status: Literal["valid", "expired", "missing"]
 
 
 class UsageDto(Strict):

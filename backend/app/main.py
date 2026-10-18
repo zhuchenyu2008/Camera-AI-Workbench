@@ -194,6 +194,7 @@ def create_app(config: Config | None = None, workbench: Workbench | None = None)
                         "deleteReference",
                         "updateProvider",
                         "deleteProvider",
+                        "updateProviderPricing",
                         "updateSettings",
                     }
                     if operation["operationId"] in versions:

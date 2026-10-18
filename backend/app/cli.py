@@ -88,7 +88,7 @@ def main():
             print(
                 json.dumps(
                     {
-                        "schema": "0003",
+                        "schema": "0004",
                         "sqlite": sqlite3.sqlite_version,
                         "timezone": "Asia/Shanghai",
                         "master_key": "readable",

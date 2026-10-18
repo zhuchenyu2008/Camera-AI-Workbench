@@ -126,7 +126,7 @@ def status_data(w):
     return dict(
         server_time=iso(now),
         api_version="1.0",
-        db_schema_version="0003",
+        db_schema_version="0004",
         worker_heartbeat_at=iso(stamp),
         worker_state=state,
         cameras=cameras,
@@ -141,6 +141,15 @@ def status_data(w):
         providers=providers,
         warnings=warnings,
     )
+
+
+def format_cost(val: Decimal) -> str:
+    text = f"{val:f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+        if text == "":
+            text = "0"
+    return text
 
 
 def aggregate_usage(rows):
@@ -167,6 +176,52 @@ def aggregate_usage(rows):
     if costs and len(costs) == len(rows) and len(currencies) == 1:
         result["cost"] = str(sum(Decimal(r["reported_cost"]) for r in costs))
         result["currency"] = currencies.pop()
+
+    converted = [r for r in rows if r.get("cost_status") == "converted"]
+    unconverted = [r for r in rows if r.get("cost_status") == "unconverted"]
+    unpriced = [r for r in rows if r.get("cost_status") in ("unpriced", None)]
+
+    cny_amounts = [
+        Decimal(r["estimated_cost_cny"]) for r in converted if r.get("estimated_cost_cny") is not None
+    ]
+    estimated_cny = format_cost(sum(cny_amounts)) if cny_amounts else None
+
+    by_currency: dict[str, list[Decimal]] = {}
+    for r in rows:
+        curr = (r.get("price_snapshot_json") or {}).get("currency")
+        cost = r.get("estimated_cost")
+        if curr and cost is not None:
+            by_currency.setdefault(curr, []).append(Decimal(cost))
+    by_currency_str = {curr: format_cost(sum(amounts)) for curr, amounts in sorted(by_currency.items())}
+
+    reasons = sorted({r["cost_reason"] for r in rows if r.get("cost_reason")})
+    price_revisions = sorted({r["pricing_revision"] for r in rows if r.get("pricing_revision") is not None})
+    exchange_dates = sorted(
+        {
+            (r.get("exchange_rate_snapshot_json") or {}).get("rate_date")
+            for r in rows
+            if (r.get("exchange_rate_snapshot_json") or {}).get("rate_date")
+        }
+    )
+
+    if len(rows) > 0 and len(converted) == len(rows):
+        completeness = "full"
+    elif len(converted) > 0:
+        completeness = "partial"
+    else:
+        completeness = "none"
+
+    result["cost_summary"] = {
+        "estimated_cny_subtotal": estimated_cny,
+        "by_currency": by_currency_str,
+        "converted_requests": len(converted),
+        "unpriced_requests": len(unpriced),
+        "unconverted_requests": len(unconverted),
+        "reasons": reasons,
+        "applicable_price_revisions": price_revisions,
+        "exchange_rate_dates": exchange_dates,
+        "completeness": completeness,
+    }
     return result
 
 

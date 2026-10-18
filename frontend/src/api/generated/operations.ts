@@ -357,6 +357,20 @@ export const operations = {
     "versioned": true,
     "binary": false
   },
+  "getProviderPricing": {
+    "method": "GET",
+    "path": "/api/providers/{provider_id}/pricing",
+    "idempotent": false,
+    "versioned": false,
+    "binary": false
+  },
+  "updateProviderPricing": {
+    "method": "PUT",
+    "path": "/api/providers/{provider_id}/pricing",
+    "idempotent": true,
+    "versioned": true,
+    "binary": false
+  },
   "testProvider": {
     "method": "POST",
     "path": "/api/providers/test",

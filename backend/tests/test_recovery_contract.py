@@ -135,7 +135,7 @@ def test_B04_migration_and_consistent_backup(w, tmp_path):
         assert conn.exec_driver_sql("PRAGMA journal_mode").scalar_one() == "wal"
         assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
         assert conn.exec_driver_sql("PRAGMA synchronous").scalar_one() == 2
-        assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "0003"
+        assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "0004"
     target = tmp_path / "consistent.sqlite3"
     w.db.backup(target)
     with sqlite3.connect(target) as conn:

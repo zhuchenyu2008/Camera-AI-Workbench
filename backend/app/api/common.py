@@ -25,8 +25,11 @@ def respond(request, data=None, status=200, page=None):
         body["page"] = page
     headers = {}
     resource = data.get("settings", data) if isinstance(data, dict) else None
-    if isinstance(resource, dict) and isinstance(resource.get("revision"), int):
-        headers["ETag"] = f'"rev-{resource["revision"]}"'
+    rev = resource.get("revision") if isinstance(resource, dict) else None
+    if rev is None and isinstance(resource, dict):
+        rev = resource.get("pricing_revision")
+    if isinstance(rev, int):
+        headers["ETag"] = f'"rev-{rev}"'
     return JSONResponse(body, status_code=status, headers=headers)
 
 

@@ -34,6 +34,7 @@ export type Envelope_MinuteDto_ = { "data": MinuteDto; "meta": Meta; };
 export type Envelope_OverviewDto_ = { "data": OverviewDto; "meta": Meta; };
 export type Envelope_PreviewDto_ = { "data": PreviewDto; "meta": Meta; };
 export type Envelope_ProviderDto_ = { "data": ProviderDto; "meta": Meta; };
+export type Envelope_ProviderPricingDto_ = { "data": ProviderPricingDto; "meta": Meta; };
 export type Envelope_ReferenceDto_ = { "data": ReferenceDto; "meta": Meta; };
 export type Envelope_SessionDto_ = { "data": SessionDto; "meta": Meta; };
 export type Envelope_SettingsDto_ = { "data": SettingsDto; "meta": Meta; };
@@ -71,6 +72,9 @@ export type PreviewDto = { "camera_id": string; "capture_state": "stopped" | "st
 export type Progress = { "completed_units"?: number; "total_units"?: (number | null); "failed_units"?: number; "expired_units"?: number; "unit"?: "batch" | "minute" | "step"; };
 export type PromoteReference = { "evidence_id": string; "crop"?: (Crop | null); "keep_as_reference": true; "name"?: (string | null); "enabled"?: boolean; };
 export type ProviderDto = { "id": string; "revision": number; "name": string; "base_url": string; "model": string; "api_key_configured": boolean; "config": { [key: string]: unknown; }; "capabilities": Capabilities; "tested_config_revision": (number | null); "tested_at": (string | null); "last_test_error"?: (string | null); };
+export type ProviderPricingConfig = { "currency": "CNY" | "USD"; "input_price": string; "output_price": string; "cached_input_price"?: (string | null); "source_note": string; };
+export type ProviderPricingDto = { "provider_id": string; "pricing_revision": number; "provider_revision": number; "applicable": boolean; "price_configured": boolean; "pricing"?: (ProviderPricingConfig | null); "bound_base_url"?: (string | null); "bound_model"?: (string | null); "updated_at"?: (string | null); };
+export type ProviderPricingWrite = { "provider_revision": number; "pricing_revision": number; "clear"?: boolean; "currency"?: ("CNY" | "USD" | null); "input_price"?: (string | null); "output_price"?: (string | null); "cached_input_price"?: (string | null); "source_note"?: (string | null); };
 export type ProviderTest = { "provider_id": string; "config_revision": number; };
 export type ProviderWrite = { "name": string; "base_url": string; "model": string; "api_key"?: (string | null); "api_key_action"?: "keep" | "clear"; "timeout_seconds"?: number; "max_total_images"?: number; "max_request_body_mib"?: number; "max_capture_images"?: number; "output_token_limit"?: number; "output_token_parameter"?: "max_completion_tokens" | "max_tokens"; "response_format_mode"?: "json_schema" | "json_object" | "prompt_json"; "detail_mode"?: "auto" | "low" | "high" | "omit"; };
 export type ReferenceDto = { "asset_id": string; "entity_id": string; "entity_revision": number; "asset_version": number; "revision": number; "name_snapshot": string; "enabled": boolean; "width": number; "height": number; "sha256": string; "created_at": string; "deleted_at": (string | null); "content_url": (string | null); "source_evidence_id"?: (string | null); };
@@ -93,9 +97,10 @@ export type SummaryDto = { "id": string; "revision": number; "type": "hour" | "d
 export type TimelineBucket = { "start_at": string; "end_at": string; "coverage": Coverage; "activities": Array<ActivityDuration>; };
 export type TimelineDto = { "from": string; "to": string; "scope": ScopeDto; "bucket_seconds": 60 | 300 | 900; "projection_revision": number; "buckets": Array<TimelineBucket>; "event_refs": Array<{ [key: string]: unknown; }>; "truncated": boolean; };
 export type TokenTotal = { "value": (number | null); "known_count": number; "unknown_count": number; };
-export type UsageBucket = { "requests": number; "succeeded": number; "failed": number; "unknown_usage_requests": number; "capture_images": number; "reference_images": number; "input_tokens": TokenTotal; "output_tokens": TokenTotal; "cached_tokens": TokenTotal; "cost": (string | null); "currency": (string | null); "cost_estimated": boolean; "key": string; };
+export type UsageBucket = { "requests": number; "succeeded": number; "failed": number; "unknown_usage_requests": number; "capture_images": number; "reference_images": number; "input_tokens": TokenTotal; "output_tokens": TokenTotal; "cached_tokens": TokenTotal; "cost": (string | null); "currency": (string | null); "cost_estimated": boolean; "cost_summary": UsageCostSummary; "key": string; };
+export type UsageCostSummary = { "estimated_cny_subtotal": (string | null); "by_currency": { [key: string]: string; }; "converted_requests": number; "unpriced_requests": number; "unconverted_requests": number; "reasons": Array<string>; "applicable_price_revisions": Array<number>; "exchange_rate_dates": Array<string>; "completeness": "full" | "partial" | "none"; };
 export type UsageDto = { "from": string; "to": string; "group_by": "hour" | "day" | "provider" | "purpose"; "buckets": Array<UsageBucket>; "totals": UsageTotal; };
-export type UsageTotal = { "requests": number; "succeeded": number; "failed": number; "unknown_usage_requests": number; "capture_images": number; "reference_images": number; "input_tokens": TokenTotal; "output_tokens": TokenTotal; "cached_tokens": TokenTotal; "cost": (string | null); "currency": (string | null); "cost_estimated": boolean; };
+export type UsageTotal = { "requests": number; "succeeded": number; "failed": number; "unknown_usage_requests": number; "capture_images": number; "reference_images": number; "input_tokens": TokenTotal; "output_tokens": TokenTotal; "cached_tokens": TokenTotal; "cost": (string | null); "currency": (string | null); "cost_estimated": boolean; "cost_summary": UsageCostSummary; };
 export type WarningDto = { "code": string; "message": string; "affected_resource_ids"?: Array<string>; };
 export interface Operations {
   getHealth: { method: "GET"; path: "/health/live"; body: void; response: unknown; parameters: {  } };
@@ -149,6 +154,8 @@ export interface Operations {
   createProvider: { method: "POST"; path: "/api/providers"; body: ProviderWrite; response: Envelope_ProviderDto_; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; }; } };
   updateProvider: { method: "PATCH"; path: "/api/providers/{provider_id}"; body: ProviderWrite; response: Envelope_ProviderDto_; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; "If-Match": string; }; path: { "provider_id": string; }; } };
   deleteProvider: { method: "DELETE"; path: "/api/providers/{provider_id}"; body: void; response: void; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; "If-Match": string; }; path: { "provider_id": string; }; } };
+  getProviderPricing: { method: "GET"; path: "/api/providers/{provider_id}/pricing"; body: void; response: Envelope_ProviderPricingDto_; parameters: { path: { "provider_id": string; }; } };
+  updateProviderPricing: { method: "PUT"; path: "/api/providers/{provider_id}/pricing"; body: ProviderPricingWrite; response: Envelope_ProviderPricingDto_; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; "If-Match": string; }; path: { "provider_id": string; }; } };
   testProvider: { method: "POST"; path: "/api/providers/test"; body: ProviderTest; response: Envelope_JobDto_; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; }; } };
   getSettings: { method: "GET"; path: "/api/settings"; body: void; response: Envelope_SettingsDto_; parameters: {  } };
   updateSettings: { method: "PATCH"; path: "/api/settings"; body: SettingsUpdate; response: Envelope_SettingsUpdateDto_; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; "If-Match": string; }; } };

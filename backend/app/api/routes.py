@@ -43,6 +43,8 @@ from app.schemas import (
     PreviewDto,
     PromoteReference,
     ProviderDto,
+    ProviderPricingDto,
+    ProviderPricingWrite,
     ProviderTest,
     ProviderWrite,
     ReferenceDto,
@@ -1173,6 +1175,32 @@ def delete_provider(request: Request, provider_id: str):
         return 204, None
 
     return mutation(request, "deleteProvider", {}, apply)
+
+
+@router.get(
+    "/api/providers/{provider_id}/pricing",
+    operation_id="getProviderPricing",
+    response_model=Envelope[ProviderPricingDto],
+)
+def get_provider_pricing(request: Request, provider_id: str):
+    w = request.app.state.workbench
+    with w.db.read() as conn:
+        return respond(request, w.provider_pricing(conn, provider_id))
+
+
+@router.put(
+    "/api/providers/{provider_id}/pricing",
+    operation_id="updateProviderPricing",
+    response_model=Envelope[ProviderPricingDto],
+)
+def update_provider_pricing(request: Request, provider_id: str, dto: ProviderPricingWrite):
+    w = request.app.state.workbench
+    return mutation(
+        request,
+        "updateProviderPricing",
+        dto.model_dump(mode="json"),
+        lambda conn: (200, w.write_provider_pricing(conn, provider_id, dto, request.headers.get("If-Match"))),
+    )
 
 
 @router.post(

@@ -721,7 +721,156 @@ class Workbench:
                     paused=False,
                 )
             )
+            conn.execute(
+                s.provider_pricing.insert().values(
+                    id=new_id("pricing"),
+                    provider_id=resource_id,
+                    revision=1,
+                    created_at_ms=now,
+                    updated_at_ms=now,
+                )
+            )
         return self.provider(conn, resource_id)
+
+    def provider_pricing(self, conn, provider_id: str) -> dict:
+        provider = one(conn, s.providers, provider_id)
+        row = conn.execute(
+            select(s.provider_pricing).where(s.provider_pricing.c.provider_id == provider_id)
+        ).mappings().first()
+        if not row:
+            now = self.now()
+            pricing_id = new_id("pricing")
+            conn.execute(
+                s.provider_pricing.insert().values(
+                    id=pricing_id,
+                    provider_id=provider_id,
+                    revision=1,
+                    created_at_ms=now,
+                    updated_at_ms=now,
+                )
+            )
+            row = conn.execute(
+                select(s.provider_pricing).where(s.provider_pricing.c.id == pricing_id)
+            ).mappings().one()
+
+        cfg = provider["config_json"]
+        is_configured = bool(row["currency"] and row["input_price"] and row["output_price"])
+        applicable = bool(
+            is_configured
+            and row["base_url"] == cfg["base_url"]
+            and row["model"] == cfg["model"]
+        )
+        return dict(
+            provider_id=provider_id,
+            pricing_revision=row["revision"],
+            provider_revision=provider["revision"],
+            applicable=applicable,
+            price_configured=is_configured,
+            pricing=dict(
+                currency=row["currency"],
+                input_price=row["input_price"],
+                output_price=row["output_price"],
+                cached_input_price=row["cached_input_price"],
+                source_note=row["source_note"],
+            ) if is_configured else None,
+            bound_base_url=row["base_url"],
+            bound_model=row["model"],
+            updated_at=iso(row["updated_at_ms"]),
+        )
+
+    def write_provider_pricing(self, conn, provider_id: str, dto, header: str | None) -> dict:
+        provider = one(conn, s.providers, provider_id)
+        if provider["revision"] != dto.provider_revision:
+            raise AppError(
+                412,
+                "REVISION_CONFLICT",
+                "模型服务配置版本已变化，请刷新后重试",
+                details={"provider_revision": provider["revision"]},
+            )
+        row = conn.execute(
+            select(s.provider_pricing).where(s.provider_pricing.c.provider_id == provider_id)
+        ).mappings().first()
+        if not row:
+            now = self.now()
+            pricing_id = new_id("pricing")
+            conn.execute(
+                s.provider_pricing.insert().values(
+                    id=pricing_id,
+                    provider_id=provider_id,
+                    revision=1,
+                    created_at_ms=now,
+                    updated_at_ms=now,
+                )
+            )
+            row = conn.execute(
+                select(s.provider_pricing).where(s.provider_pricing.c.id == pricing_id)
+            ).mappings().one()
+
+        require_revision(row, header)
+        now = self.now()
+        new_rev = row["revision"] + 1
+
+        if dto.clear:
+            conn.execute(
+                update(s.provider_pricing)
+                .where(s.provider_pricing.c.id == row["id"])
+                .values(
+                    base_url=None,
+                    model=None,
+                    currency=None,
+                    input_price=None,
+                    output_price=None,
+                    cached_input_price=None,
+                    source_note=None,
+                    revision=new_rev,
+                    updated_at_ms=now,
+                )
+            )
+        else:
+            cfg = provider["config_json"]
+            conn.execute(
+                update(s.provider_pricing)
+                .where(s.provider_pricing.c.id == row["id"])
+                .values(
+                    base_url=cfg["base_url"],
+                    model=cfg["model"],
+                    currency=dto.currency,
+                    input_price=dto.input_price,
+                    output_price=dto.output_price,
+                    cached_input_price=dto.cached_input_price,
+                    source_note=dto.source_note,
+                    revision=new_rev,
+                    updated_at_ms=now,
+                )
+            )
+            if dto.currency == "USD":
+                rate_row = conn.execute(
+                    select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny")
+                ).mappings().first()
+                if not rate_row or not self.is_rate_valid(rate_row["rate_date"]):
+                    from app.worker.queue import enqueue
+                    enqueue(
+                        conn,
+                        now,
+                        "exchange_rate_refresh",
+                        {"reason": "initial_usd_pricing"},
+                        f"exchange-rate-initial:{now}",
+                        total=1,
+                    )
+        return self.provider_pricing(conn, provider_id)
+
+    def is_rate_valid(self, rate_date_str: str | None) -> bool:
+        if not rate_date_str:
+            return False
+        try:
+            from datetime import date, datetime
+            from app.timeutils import BEIJING
+            rate_d = date.fromisoformat(rate_date_str)
+            curr_d = datetime.fromtimestamp(self.now() / 1000, BEIJING).date()
+            diff = (curr_d - rate_d).days
+            return 0 <= diff <= 7
+        except Exception:
+            return False
 
     def delete_provider(self, conn, resource_id, header):
         row = one(conn, s.providers, resource_id)

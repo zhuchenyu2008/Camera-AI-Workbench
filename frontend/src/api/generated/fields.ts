@@ -369,5 +369,118 @@ export const fields = {
       "title": "Detail Mode",
       "default": "auto"
     }
+  },
+  "ProviderPricingConfig": {
+    "currency": {
+      "type": "string",
+      "enum": [
+        "CNY",
+        "USD"
+      ],
+      "title": "Currency"
+    },
+    "input_price": {
+      "type": "string",
+      "title": "Input Price"
+    },
+    "output_price": {
+      "type": "string",
+      "title": "Output Price"
+    },
+    "cached_input_price": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Cached Input Price"
+    },
+    "source_note": {
+      "type": "string",
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Source Note"
+    }
+  },
+  "ProviderPricingWrite": {
+    "provider_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "title": "Provider Revision"
+    },
+    "pricing_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "title": "Pricing Revision"
+    },
+    "clear": {
+      "type": "boolean",
+      "title": "Clear",
+      "default": false
+    },
+    "currency": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "CNY",
+            "USD"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Currency"
+    },
+    "input_price": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Input Price"
+    },
+    "output_price": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Output Price"
+    },
+    "cached_input_price": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Cached Input Price"
+    },
+    "source_note": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 500,
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Source Note"
+    }
   }
 } as const;
