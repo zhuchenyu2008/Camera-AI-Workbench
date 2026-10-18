@@ -27,7 +27,7 @@ import {
   QueryState,
   Skeleton,
 } from "../../shared/components";
-import { clock, dateTime, serverNow } from "../../shared/time";
+import { dateTime, serverNow } from "../../shared/time";
 import { captureLabel } from "../../shared/labels";
 import { CameraPreview } from "../../shared/media/CameraPreview";
 import { polygonError } from "../../shared/roi";
@@ -200,21 +200,6 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
     await invalidate("getCamera", "listCameras", "getStatus", "getOverview");
     await invalidateMedia();
   };
-  const prepare = async () => {
-    const p = patch();
-    if (!Object.keys(p).length) return;
-    const needs = ["source", "enabled", "retention_minutes"].some(
-      (k) => k in p,
-    );
-    if (needs) {
-      const r = await api("previewCameraUpdate", {
-        path: { camera_id: base!.id },
-        body: { base_revision: base!.revision, patch: p },
-      });
-      setPendingPatch(p);
-      setImpact(r.data);
-    } else await action.run([base!.revision, p], (key) => save(key, p));
-  };
   return (
     <>
       <PageHeading
@@ -378,7 +363,7 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
             家庭摄像头经软路由和 frp 接入此端口，RTSP 只由后端读取。
             <a
               className="text-link"
-              href="https://github.com/zhuchenyu2008/Camera-AI-Workbench/blob/main/docs/02-%E7%9B%91%E6%8E%A7%E8%A7%86%E9%A2%91%E6%B5%81%E8%BF%9C%E7%A8%8B%E6%8E%A5%E5%85%A5%E4%B8%8E%E9%83%A8%E7%BD%B2%E6%96%B9%E6%A1%88.md"
+              href="/help/remote-access.html"
               target="_blank"
               rel="noreferrer"
             >

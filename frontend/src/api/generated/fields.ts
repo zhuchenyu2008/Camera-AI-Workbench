@@ -252,16 +252,6 @@ export const fields = {
       "maxItems": 100,
       "title": "Activity Labels",
       "default": []
-    },
-    "notification_enabled": {
-      "type": "boolean",
-      "const": false,
-      "title": "Notification Enabled",
-      "default": false
-    },
-    "budget_limit": {
-      "type": "null",
-      "title": "Budget Limit"
     }
   },
   "ProviderWrite": {

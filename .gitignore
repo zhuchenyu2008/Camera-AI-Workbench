@@ -19,3 +19,4 @@ frontend/.playwright/
 .playwright-cli/
 output/playwright/
 *.tsbuildinfo
+frontend/public/help/

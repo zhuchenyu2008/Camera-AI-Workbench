@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Regions, Polygon } from "../../api/generated/types";
+import type { Regions } from "../../api/generated/types";
 import { Button, Field, Notice } from "../../shared/components";
 import {
   containedRect,

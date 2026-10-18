@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   CameraOff,
   Image as ImageIcon,
-  Maximize2,
   Play,
   Video,
 } from "lucide-react";

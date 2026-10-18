@@ -2,17 +2,16 @@ import { useState } from "react";
 import {
   ArrowRight,
   Camera,
-  Check,
   ChevronRight,
   Clock3,
   Plus,
-  Radio,
   ScanLine,
 } from "lucide-react";
-import { useApi } from "../../api/query";
+import { useAllApi, useApi } from "../../api/query";
 import {
   ActivityChart,
   Badge,
+  Button,
   CheckItem,
   CoverageTrack,
   EmptyState,
@@ -39,12 +38,9 @@ import { TimelineStrip } from "../timeline/TimelineStrip";
 export function Overview() {
   const scope = useScope(),
     [selected, setSelected] = useState("");
-  const cameras = useApi(
-      "listCameras",
-      { query: { limit: 100 } },
-      { poll: 5000 },
-    ),
-    entities = useApi("listEntities", { query: { limit: 100 } }),
+  const cameras = useAllApi("listCameras", undefined, { poll: 5000 }),
+    entities = useAllApi("listEntities"),
+    providers = useAllApi("listProviders"),
     settings = useApi("getSettings");
   const q = useApi(
     "getOverview",
@@ -56,9 +52,54 @@ export function Overview() {
     { query: { ...scope.query, bucket_seconds: 300 } },
     { poll: scope.date === localDate() ? 30000 : undefined },
   );
+
+  const cameraList = cameras.data ?? [];
   const camera =
-    cameras.data?.data.find((c) => c.id === selected) ?? cameras.data?.data[0];
-  const noCameras = cameras.isSuccess && !cameras.data.data.length;
+    cameraList.find((c) => c.id === selected) ?? cameraList[0];
+
+  const isGuideLoading =
+    cameras.isLoading ||
+    entities.isLoading ||
+    providers.isLoading ||
+    settings.isLoading;
+  const isGuideError =
+    cameras.isError ||
+    entities.isError ||
+    providers.isError ||
+    settings.isError;
+
+  const visionProviderId = settings.data?.data.config.vision_provider_id;
+  const visionProvider = visionProviderId
+    ? providers.data?.find((p) => p.id === visionProviderId)
+    : undefined;
+  const step1Done = Boolean(
+    visionProvider &&
+      visionProvider.tested_config_revision === visionProvider.revision &&
+      visionProvider.capabilities.vision === true,
+  );
+  const step2Done = Boolean(
+    entities.data?.some(
+      (e) =>
+        e.is_primary_subject &&
+        e.enabled &&
+        e.references.some((r) => r.enabled),
+    ),
+  );
+  const step3Done = Boolean(
+    cameraList.filter((c) => !c.deleted_at).length > 0,
+  );
+  const step4Done = Boolean(
+    cameraList.some(
+      (c) =>
+        c.enabled &&
+        !c.deleted_at &&
+        c.last_test != null &&
+        (c.last_test as { source_revision?: number }).source_revision ===
+          c.source_revision,
+    ),
+  );
+  const allStepsDone = step1Done && step2Done && step3Done && step4Done;
+
   return (
     <>
       <PageHeading
@@ -73,99 +114,115 @@ export function Overview() {
         }
       />
       <ScopePicker />
-      {noCameras ? (
+      {!allStepsDone && (
         <Panel title="开始记录你的第一天" kicker="GET STARTED">
           <p className="muted">
             完成以下配置，等待第一分钟记录。每一步的状态来自服务器。
           </p>
-          <div className="setup-grid">
-            <CheckItem
-              done={Boolean(settings.data?.data.config.vision_provider_id)}
-            >
-              <ScopeLink to="/settings/ai">
-                <strong>01 配置 AI 服务</strong>
-                <span>测试图片与结构化输出能力</span>
-                <ChevronRight size={16} />
-              </ScopeLink>
-            </CheckItem>
-            <CheckItem
-              done={Boolean(
-                entities.data?.data.some(
-                  (e) =>
-                    e.is_primary_subject && e.references.some((r) => r.enabled),
-                ),
-              )}
-            >
-              <ScopeLink to="/entities">
-                <strong>02 添加参考资料</strong>
-                <span>设置主人物及适用机位</span>
-                <ChevronRight size={16} />
-              </ScopeLink>
-            </CheckItem>
-            <CheckItem done={false}>
-              <ScopeLink to="/cameras/new">
-                <strong>03 添加摄像头</strong>
-                <span>测试连接、设置计划与区域</span>
-                <ChevronRight size={16} />
-              </ScopeLink>
-            </CheckItem>
-            <CheckItem done={false}>
-              <ScopeLink to="/cameras">
-                <strong>04 预检并启用</strong>
-                <span>确认保存范围，等待首次记录</span>
-                <ChevronRight size={16} />
-              </ScopeLink>
-            </CheckItem>
-          </div>
-          <ScopeLink className="button primary" to="/cameras/new">
-            <Plus size={17} />
-            添加第一台摄像头
-          </ScopeLink>
+          {isGuideLoading ? (
+            <p className="caption muted">正在读取配置与设备状态...</p>
+          ) : isGuideError ? (
+            <Notice tone="danger">
+              读取配置与设备状态失败。
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  void settings.refetch();
+                  void providers.refetch();
+                  void entities.refetch();
+                  void cameras.refetch();
+                }}
+              >
+                重试
+              </Button>
+            </Notice>
+          ) : (
+            <div className="setup-grid">
+              <CheckItem done={step1Done}>
+                <ScopeLink to="/settings/ai">
+                  <strong>01 配置 AI 服务</strong>
+                  <span>测试图片与结构化输出能力</span>
+                  <ChevronRight size={16} />
+                </ScopeLink>
+              </CheckItem>
+              <CheckItem done={step2Done}>
+                <ScopeLink to="/entities">
+                  <strong>02 添加参考资料</strong>
+                  <span>设置主人物及适用机位</span>
+                  <ChevronRight size={16} />
+                </ScopeLink>
+              </CheckItem>
+              <CheckItem done={step3Done}>
+                <ScopeLink to="/cameras/new">
+                  <strong>03 添加摄像头</strong>
+                  <span>测试连接、设置计划与区域</span>
+                  <ChevronRight size={16} />
+                </ScopeLink>
+              </CheckItem>
+              <CheckItem done={step4Done}>
+                <ScopeLink to="/cameras">
+                  <strong>04 测试并启用</strong>
+                  <span>确认保存范围，等待首次记录</span>
+                  <ChevronRight size={16} />
+                </ScopeLink>
+              </CheckItem>
+            </div>
+          )}
+          {cameraList.length === 0 && (
+            <ScopeLink className="button primary" to="/cameras/new">
+              <Plus size={17} />
+              添加第一台摄像头
+            </ScopeLink>
+          )}
         </Panel>
-      ) : (
+      )}
+      {cameraList.length > 0 && (
         <div className="overview-top">
           <Panel
             className="preview-panel"
             kicker="CAMERA / LIVE VIEW"
             title="当前画面"
             action={
-              <label className="sr-labeled-select">
-                <span className="sr-only">预览机位</span>
-                <select
-                  value={camera?.id ?? ""}
-                  onChange={(e) => setSelected(e.target.value)}
-                >
-                  {cameras.data?.data.map((c) => (
-                    <option value={c.id} key={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              cameraList.length >= 2 ? (
+                <label className="sr-labeled-select">
+                  <span className="sr-only">预览机位</span>
+                  <select
+                    value={camera?.id ?? ""}
+                    onChange={(e) => setSelected(e.target.value)}
+                  >
+                    {cameraList.map((c) => (
+                      <option value={c.id} key={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : cameraList.length === 1 ? (
+                <span className="caption muted">{cameraList[0].name}</span>
+              ) : null
             }
           >
-            <QueryState query={cameras}>
-              {() =>
-                camera ? (
-                  <>
-                    <CameraPreview camera={camera} />
-                    <div className="capture-footer">
-                      <Badge
-                        tone={
-                          camera.runtime.capture_state === "online"
-                            ? "success"
-                            : "neutral"
-                        }
-                        dot={camera.runtime.capture_state === "online"}
-                      >
-                        {captureLabel(camera.runtime)}
-                      </Badge>
-                      <CameraControl camera={camera} />
-                    </div>
-                  </>
-                ) : null
-              }
-            </QueryState>
+            {cameras.isLoading ? (
+              <p className="caption muted">正在读取机位...</p>
+            ) : camera ? (
+              <>
+                <CameraPreview camera={camera} />
+                <div className="capture-footer">
+                  <Badge
+                    tone={
+                      camera.runtime.capture_state === "online"
+                        ? "success"
+                        : "neutral"
+                    }
+                    dot={camera.runtime.capture_state === "online"}
+                  >
+                    {captureLabel(camera.runtime)}
+                  </Badge>
+                  <CameraControl camera={camera} />
+                </div>
+              </>
+            ) : null}
           </Panel>
           <Panel
             title="活动时长"
@@ -220,7 +277,7 @@ export function Overview() {
           中建立档案；人物未确认的观察不会计入“我”的确定时长。
         </Notice>
       )}
-      {cameras.data?.data.length &&
+      {cameraList.length > 0 &&
       !settings.data?.data.config.vision_provider_id ? (
         <Notice tone="warning">
           摄像头可独立采集，AI 服务尚未配置；有画面的范围将等待分析。
@@ -290,8 +347,8 @@ export function Overview() {
               <div>
                 <strong>采集画面</strong>
                 <p>
-                  {cameras.data?.data.length
-                    ? `${cameras.data.data.filter((c) => c.runtime.capture_state === "online").length} / ${cameras.data.data.length} 台正在采集`
+                  {cameraList.length
+                    ? `${cameraList.filter((c) => c.runtime.capture_state === "online").length} / ${cameraList.length} 台正在采集`
                     : "尚未配置机位"}
                 </p>
               </div>
@@ -314,10 +371,11 @@ export function Overview() {
                 <Clock3 size={18} />
               </span>
               <div>
-                <strong>现场图保存</strong>
+                <strong>现场图与记录保存</strong>
                 <p>
+                  现场图保留{" "}
                   {settings.data?.data.config.frame_retention_minutes ?? "—"}{" "}
-                  分钟 · 文字记录保留
+                  分钟；文字记录永久保留
                 </p>
               </div>
             </div>

@@ -23,7 +23,6 @@ import type {
   ActivityDuration,
   Coverage,
   EventDto,
-  JobDto,
   ImpactPreviewDto,
 } from "../api/generated/types";
 import { api, ApiError, errorText } from "../api/client";
@@ -31,7 +30,6 @@ import { useApi, invalidate, recordOps } from "../api/query";
 import { useAction } from "./hooks";
 import {
   activities,
-  captureLabel,
   evidenceLabels,
   jobLabels,
   phaseLabels,
@@ -39,11 +37,9 @@ import {
 } from "./labels";
 import {
   clock,
-  dateLabel,
   dateTime,
   duration,
   localDate,
-  serverNow,
   dayRange,
 } from "./time";
 

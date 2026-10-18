@@ -148,7 +148,7 @@ function SettingsForm({ settings }: { settings: SettingsDto }) {
           <Badge>北京时间</Badge>
         </div>
         <p className="caption muted" style={{ marginTop: 12 }}>
-          采集频率、时区固定；首版不提供通知与预算封顶开关。
+          采集频率固定为每秒一张，时区固定为北京时间。现场图保留 {settings.config.frame_retention_minutes} 分钟；文字记录永久保留。
         </p>
       </Panel>
       <form
@@ -346,33 +346,170 @@ function SettingsForm({ settings }: { settings: SettingsDto }) {
           <p className="caption muted">
             全局配置与当前 Provider 配置共同限制；以下为后端计算结果。
           </p>
-          <dl className="definition-list">
-            {Object.entries(settings.effective_limits).map(([k, v]) => (
-              <div key={k}>
-                <dt>
-                  {(
-                    {
-                      vision: "视觉分析",
-                      summary: "汇总",
-                      max_total_images: "总图上限",
-                      max_capture_images: "现场图上限",
-                      max_request_body_bytes: "请求体字节",
-                      timeout_seconds: "超时（秒）",
-                    } as Record<string, string>
-                  )[k] ?? k}
-                </dt>
-                <dd>
-                  {v == null
-                    ? "未知"
-                    : typeof v === "object"
-                      ? Object.entries(v)
-                          .map(([x, y]) => `${x}: ${y}`)
-                          .join("；")
-                      : String(v)}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <div className="stack" style={{ gap: 16 }}>
+            <div>
+              <strong>视觉分析</strong>
+              {settings.effective_limits.vision &&
+              typeof settings.effective_limits.vision === "object" ? (
+                <dl className="definition-list" style={{ marginTop: 8 }}>
+                  <div>
+                    <dt>总图上限</dt>
+                    <dd>
+                      {String(
+                        (
+                          settings.effective_limits.vision as Record<
+                            string,
+                            unknown
+                          >
+                        ).max_total_images,
+                      )}{" "}
+                      张
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>现场图上限</dt>
+                    <dd>
+                      {String(
+                        (
+                          settings.effective_limits.vision as Record<
+                            string,
+                            unknown
+                          >
+                        ).max_capture_images,
+                      )}{" "}
+                      张
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>请求体上限</dt>
+                    <dd>
+                      {(
+                        Number(
+                          (
+                            settings.effective_limits.vision as Record<
+                              string,
+                              unknown
+                            >
+                          ).max_request_body_bytes,
+                        ) /
+                        1024 /
+                        1024
+                      ).toFixed(1)}{" "}
+                      MiB（
+                      {Number(
+                        (
+                          settings.effective_limits.vision as Record<
+                            string,
+                            unknown
+                          >
+                        ).max_request_body_bytes,
+                      ).toLocaleString()}{" "}
+                      字节）
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>超时</dt>
+                    <dd>
+                      {String(
+                        (
+                          settings.effective_limits.vision as Record<
+                            string,
+                            unknown
+                          >
+                        ).timeout_seconds,
+                      )}{" "}
+                      秒
+                    </dd>
+                  </div>
+                </dl>
+              ) : (
+                <p className="caption muted" style={{ marginTop: 6 }}>
+                  尚未选择视觉服务
+                </p>
+              )}
+            </div>
+            <div>
+              <strong>汇总</strong>
+              {settings.effective_limits.summary &&
+              typeof settings.effective_limits.summary === "object" ? (
+                <dl className="definition-list" style={{ marginTop: 8 }}>
+                  <div>
+                    <dt>总图上限</dt>
+                    <dd>
+                      {String(
+                        (
+                          settings.effective_limits.summary as Record<
+                            string,
+                            unknown
+                          >
+                        ).max_total_images,
+                      )}{" "}
+                      张
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>现场图上限</dt>
+                    <dd>
+                      {String(
+                        (
+                          settings.effective_limits.summary as Record<
+                            string,
+                            unknown
+                          >
+                        ).max_capture_images,
+                      )}{" "}
+                      张
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>请求体上限</dt>
+                    <dd>
+                      {(
+                        Number(
+                          (
+                            settings.effective_limits.summary as Record<
+                              string,
+                              unknown
+                            >
+                          ).max_request_body_bytes,
+                        ) /
+                        1024 /
+                        1024
+                      ).toFixed(1)}{" "}
+                      MiB（
+                      {Number(
+                        (
+                          settings.effective_limits.summary as Record<
+                            string,
+                            unknown
+                          >
+                        ).max_request_body_bytes,
+                      ).toLocaleString()}{" "}
+                      字节）
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>超时</dt>
+                    <dd>
+                      {String(
+                        (
+                          settings.effective_limits.summary as Record<
+                            string,
+                            unknown
+                          >
+                        ).timeout_seconds,
+                      )}{" "}
+                      秒
+                    </dd>
+                  </div>
+                </dl>
+              ) : (
+                <p className="caption muted" style={{ marginTop: 6 }}>
+                  尚未选择汇总服务
+                </p>
+              )}
+            </div>
+          </div>
           <details className="diagnostic">
             <summary>查看服务端校验提示</summary>
             <pre>{JSON.stringify(settings.validation_hints, null, 2)}</pre>

@@ -28,9 +28,12 @@ def validate_summary(output: SummaryOutput, source_refs: list[dict], statistics:
     allowed_durations = set(statistics["coverage"].values()) | {
         v["duration_ms"] for v in statistics["activities"]
     }
+    units = {"毫秒": 1, "秒": 1000, "秒钟": 1000, "分钟": 60000, "小时": 3600000, "个小时": 3600000}
     for text in [output.narrative] + [v.text for v in output.highlights]:
-        for number, unit in re.findall(r"(\d+(?:\.\d+)?)\s*(毫秒|分钟|小时|秒)", text):
-            duration = round(float(number) * {"毫秒": 1, "秒": 1000, "分钟": 60000, "小时": 3600000}[unit])
+        for number, unit in re.findall(
+            r"((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(毫秒|分钟|(?:个)?小时|秒钟|秒)", text
+        ):
+            duration = round(float(number.replace(",", "")) * units[unit])
             if duration not in allowed_durations:
                 raise AppError(422, "INVALID_MODEL_OUTPUT", "模型文案的精确时长与确定性统计不一致")
 

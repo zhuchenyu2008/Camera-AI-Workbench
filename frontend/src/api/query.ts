@@ -146,3 +146,46 @@ export function invalidateMedia() {
     "getPreviewStatus",
   );
 }
+
+export function useAllApi<
+  K extends "listCameras" | "listEntities" | "listProviders",
+>(
+  op: K,
+  args: Args<K> = {} as Args<K>,
+  options: { enabled?: boolean; poll?: number } = {},
+) {
+  const queryKey = [op, "all", canonical(args)];
+  return useQuery<Operations[K]["response"]["data"], Error>({
+    queryKey,
+    queryFn: async ({ signal }) => {
+      const items: unknown[] = [];
+      let cursor: string | undefined = undefined;
+      while (true) {
+        const existingQuery =
+          args &&
+          typeof (args as Record<string, unknown>).query === "object" &&
+          (args as Record<string, unknown>).query !== null
+            ? ((args as Record<string, unknown>).query as Record<
+                string,
+                unknown
+              >)
+            : {};
+        const res = (await api(op, {
+          ...args,
+          query: { ...existingQuery, limit: 100, cursor },
+          signal,
+        } as Args<K>)) as unknown as {
+          data: unknown[];
+          page?: { has_more?: boolean; next_cursor?: string | null };
+        };
+        items.push(...res.data);
+        if (!res.page?.has_more || !res.page?.next_cursor) break;
+        cursor = res.page.next_cursor;
+      }
+      return items as Operations[K]["response"]["data"];
+    },
+    enabled: options.enabled,
+    refetchInterval: options.poll,
+  });
+}
+

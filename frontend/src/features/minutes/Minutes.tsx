@@ -23,7 +23,6 @@ import {
   RevisionPicker,
   ScopeLink,
   ScopePicker,
-  SourceLinks,
   useScope,
   JobProgress,
 } from "../../shared/components";
@@ -40,7 +39,7 @@ export function Minutes() {
       query: {
         from: scope.query.from,
         to: scope.query.to,
-        camera_id: scope.camera_ids[0],
+        camera_id: scope.camera_ids.length === 1 ? scope.camera_ids[0] : undefined,
         analysis_state: scope.search.get("analysis_state"),
         cursor: scope.search.get("cursor"),
         limit: 50,
@@ -61,27 +60,6 @@ export function Minutes() {
         action={
           <div className="actions">
             <label className="inline-field">
-              机位
-              <select
-                aria-label="分钟机位"
-                value={multi ? "multi" : (scope.camera_ids[0] ?? "")}
-                onChange={(e) =>
-                  scope.update(
-                    "camera_ids",
-                    e.target.value ? [e.target.value] : [],
-                  )
-                }
-              >
-                <option value="">全部机位</option>
-                {multi && <option value="multi">请选择单台机位</option>}
-                {cameras.data?.data.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="inline-field">
               分析状态
               <select
                 aria-label="分钟分析状态"
@@ -99,9 +77,56 @@ export function Minutes() {
           </div>
         }
       >
+        <div style={{ marginBottom: 16 }}>
+          <div className="caption muted" style={{ marginBottom: 6 }}>
+            机位筛选
+          </div>
+          <fieldset
+            role="radiogroup"
+            aria-label="机位筛选"
+            style={{ border: "none", margin: 0, padding: 0 }}
+          >
+            <legend className="sr-only">机位筛选</legend>
+            <div className="row-wrap" style={{ gap: 12 }}>
+              <label
+                className="radio-label"
+                style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+              >
+                <input
+                  type="radio"
+                  name="minute_camera"
+                  value=""
+                  checked={!multi && scope.camera_ids.length === 0}
+                  onChange={() => scope.update("camera_ids", [])}
+                />
+                <span>全部机位</span>
+              </label>
+              {cameras.data?.data.map((c) => (
+                <label
+                  key={c.id}
+                  className="radio-label"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+                >
+                  <input
+                    type="radio"
+                    name="minute_camera"
+                    value={c.id}
+                    checked={
+                      !multi &&
+                      scope.camera_ids.length === 1 &&
+                      scope.camera_ids[0] === c.id
+                    }
+                    onChange={() => scope.update("camera_ids", [c.id])}
+                  />
+                  <span>{c.name}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </div>
         {multi ? (
           <Notice>
-            分钟接口支持单机位或全部机位。请选择一台机位，或明确切换到全部机位；当前多机位范围不会被静默替换。
+            当前选择 {scope.camera_ids.length} 台机位，请选择单台或全部
           </Notice>
         ) : (
           <QueryState query={q}>

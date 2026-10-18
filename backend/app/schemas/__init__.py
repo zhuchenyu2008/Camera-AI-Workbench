@@ -537,8 +537,6 @@ class SettingsConfig(Strict):
     activity_labels: Annotated[
         list[Annotated[str, Field(min_length=1, max_length=64)]], Field(max_length=100)
     ] = []
-    notification_enabled: Literal[False] = False
-    budget_limit: None = None
 
     def minimum_retention_seconds(self) -> int:
         return max(

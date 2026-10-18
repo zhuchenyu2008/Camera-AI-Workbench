@@ -148,11 +148,11 @@ export function EvidenceViewer({
                         : image.error
                           ? image.error instanceof ApiError &&
                             image.error.status === 410
-                            ? "原图已过期；文字记录仍可查看"
+                            ? "原图已过期"
                             : "原图已不可用"
                           : "正在读取图片"}
                     </p>
-                    <small>文字记录和来源元数据仍可查看</small>
+                    <small>文字记录仍可查看</small>
                   </div>
                 )}
               </div>

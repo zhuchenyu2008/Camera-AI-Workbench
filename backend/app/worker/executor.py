@@ -215,7 +215,12 @@ class Executor:
             },
             data_image(images[0], provider["config_json"]["detail_mode"]),
         ]
-        body = build_payload(provider, SummaryOutput, content, "只输出给定 schema 的 JSON，不改变统计。")
+        body = build_payload(
+            provider,
+            SummaryOutput,
+            content,
+            "只输出给定 schema 的 JSON，不改变统计。精确时长必须与输入一致。",
+        )
         output, _ = await self.client.call(job, provider, body, SummaryOutput, 0, 1, limits)
         validate_summary(output, [], context)
         cap = dict(

@@ -4,11 +4,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "build:help": "node scripts/build-help.mjs",
+    "dev": "npm run build:help && vite --host 127.0.0.1",
     "generate": "node scripts/generate-api.mjs",
     "check:contracts": "node scripts/generate-api.mjs --check",
     "typecheck": "tsc --noEmit",
-    "build": "npm run check:contracts && tsc --noEmit && vite build && node scripts/check-bundle.mjs",
+    "build": "npm run build:help && npm run check:contracts && tsc --noEmit && vite build && node scripts/check-bundle.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -29,6 +30,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",
     "jsdom": "^27.4.0",
+    "markdown-it": "^15.0.3",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"

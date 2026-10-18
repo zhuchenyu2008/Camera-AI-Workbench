@@ -103,6 +103,18 @@ def test_B10_summary_rejects_wrong_totals_and_foreign_references():
         "coverage": {"planned_ms": 60000},
         "activities": [{"activity": "reading", "duration_ms": 60000}],
     }
+    # 允许包含千分位逗号与等价单位
+    valid = SummaryOutput(
+        narrative="统计显示 reading 活动为 60,000 毫秒（60 秒），分类时间均为 60,000 毫秒。",
+        highlights=[],
+        source_refs=[],
+    )
+    validate_summary(valid, [], statistics)
+    valid_hour = SummaryOutput(narrative="活动 1 个小时，共 60 分钟。", highlights=[], source_refs=[])
+    validate_summary(
+        valid_hour, [], {"coverage": {}, "activities": [{"activity": "x", "duration_ms": 3600000}]}
+    )
+
     wrong = SummaryOutput(narrative="阅读 2 分钟。", highlights=[], source_refs=[])
     with pytest.raises(AppError, match="INVALID_MODEL_OUTPUT"):
         validate_summary(wrong, [], statistics)
