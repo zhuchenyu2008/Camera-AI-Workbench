@@ -4,7 +4,7 @@ from app.repositories import schema as s
 from app.schemas import AnalysisCreate, AnalysisRequest
 from app.services.analysis import Analysis
 from app.timeutils import iso
-from tests.conftest import make_camera, make_provider, make_minute
+from tests.conftest import make_camera, make_minute, make_provider
 from tests.test_analysis import make_person
 
 
@@ -13,7 +13,9 @@ def test_records_only_keeps_selected_subject_in_preview_and_job(w, jpeg):
     person, _ = make_person(w, jpeg)
     camera = make_camera(w)
     body = dict(
-        mode="records_only", camera_ids=[camera], subject_id=person,
+        mode="records_only",
+        camera_ids=[camera],
+        subject_id=person,
         **{"from": iso(w.now() - 60000), "to": iso(w.now())},
     )
     with w.db.write() as conn:
@@ -41,6 +43,14 @@ def test_browser_timeline_numeric_query_and_latest_first_pagination(client, w, c
     first = client.get("/api/events", params={"from": iso(start), "to": iso(start + 180000), "limit": 1})
     assert first.status_code == 200, first.text
     assert first.json()["data"][0]["activity"] == "writing"
-    second = client.get("/api/events", params={"from": iso(start), "to": iso(start + 180000), "limit": 1, "cursor": first.json()["page"]["next_cursor"]})
+    second = client.get(
+        "/api/events",
+        params={
+            "from": iso(start),
+            "to": iso(start + 180000),
+            "limit": 1,
+            "cursor": first.json()["page"]["next_cursor"],
+        },
+    )
     assert second.status_code == 200, second.text
     assert second.json()["data"][0]["activity"] == "reading"

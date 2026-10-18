@@ -72,7 +72,8 @@ def page_rows(w, conn, statement, time_col, id_col, *, filters, limit, cursor, d
             raise AppError(400, "INVALID_CURSOR", "游标无效、过期或与筛选不匹配") from None
         statement = statement.where(
             or_(time_col < last_time, and_(time_col == last_time, id_col < last_id))
-            if descending else or_(time_col > last_time, and_(time_col == last_time, id_col > last_id))
+            if descending
+            else or_(time_col > last_time, and_(time_col == last_time, id_col > last_id))
         )
     ordering = (time_col.desc(), id_col.desc()) if descending else (time_col, id_col)
     rows = list(conn.execute(statement.order_by(*ordering).limit(limit + 1)).mappings())

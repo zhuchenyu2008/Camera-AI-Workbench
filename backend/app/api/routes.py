@@ -411,7 +411,11 @@ def event_rows(w, conn, a, b, scope, activity, limit=100):
     if scope["subject_id"]:
         stmt = stmt.where(s.event_revisions.c.summary_json["subject_id"].as_string() == scope["subject_id"])
     result = []
-    for row in conn.execute(stmt.order_by(s.event_revisions.c.summary_json["start_at"].as_string().desc(), s.events.c.id).limit(limit * 10)):
+    for row in conn.execute(
+        stmt.order_by(s.event_revisions.c.summary_json["start_at"].as_string().desc(), s.events.c.id).limit(
+            limit * 10
+        )
+    ):
         event = w.ledger.event(conn, row.id)
         if set(scope["camera_ids"]) & set(event["camera_ids"]):
             result.append(event)
@@ -431,7 +435,10 @@ def timeline(
 ):
     w = request.app.state.workbench
     a, b = range_ms(from_, to, 24)
-    if datetime.fromtimestamp(a / 1000, BEIJING).date() == datetime.fromtimestamp(w.now() / 1000, BEIJING).date():
+    if (
+        datetime.fromtimestamp(a / 1000, BEIJING).date()
+        == datetime.fromtimestamp(w.now() / 1000, BEIJING).date()
+    ):
         b = min(b, w.now())
     if b <= a:
         raise AppError(400, "INVALID_TIME_RANGE", "此范围尚未发生")
@@ -502,7 +509,9 @@ def events(
         if activity:
             stmt = stmt.where(s.event_revisions.c.summary_json["activity"].as_string() == activity)
         if identity_status:
-            stmt = stmt.where(s.event_revisions.c.summary_json["identity_status"].as_string() == identity_status)
+            stmt = stmt.where(
+                s.event_revisions.c.summary_json["identity_status"].as_string() == identity_status
+            )
         # JSON 数组包含筛选由 SQLite json_each 执行，分页前应用。
         from sqlalchemy import exists
 
@@ -516,7 +525,14 @@ def events(
             stmt,
             event_started_at,
             s.events.c.id,
-            filters={"op": "listEvents", "from": a, "to": b, "scope": scope, "activity": activity, "identity_status": identity_status},
+            filters={
+                "op": "listEvents",
+                "from": a,
+                "to": b,
+                "scope": scope,
+                "activity": activity,
+                "identity_status": identity_status,
+            },
             limit=limit,
             cursor=cursor,
             descending=True,
