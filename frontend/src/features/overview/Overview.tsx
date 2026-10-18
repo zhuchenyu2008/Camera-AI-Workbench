@@ -1,19 +1,338 @@
-import { useState } from 'react';
-import { ArrowRight, Camera, Check, ChevronRight, Clock3, Plus, Radio, ScanLine } from 'lucide-react';
-import { useApi } from '../../api/query';
-import { ActivityChart, Badge, CheckItem, CoverageTrack, EmptyState, EventList, Notice, PageHeading, Panel, QueryState, ScopeLink, ScopePicker, useScope } from '../../shared/components';
-import { compactDuration, dateLabel, duration, localDate } from '../../shared/time';
-import { captureLabel } from '../../shared/labels';
-import { CameraPreview } from '../../shared/media/CameraPreview';
-import { CameraControl } from '../cameras/CameraControl';
-import { TimelineStrip } from '../timeline/TimelineStrip';
+import { useState } from "react";
+import {
+  ArrowRight,
+  Camera,
+  Check,
+  ChevronRight,
+  Clock3,
+  Plus,
+  Radio,
+  ScanLine,
+} from "lucide-react";
+import { useApi } from "../../api/query";
+import {
+  ActivityChart,
+  Badge,
+  CheckItem,
+  CoverageTrack,
+  EmptyState,
+  EventList,
+  Notice,
+  PageHeading,
+  Panel,
+  QueryState,
+  ScopeLink,
+  ScopePicker,
+  useScope,
+} from "../../shared/components";
+import {
+  compactDuration,
+  dateLabel,
+  duration,
+  localDate,
+} from "../../shared/time";
+import { captureLabel } from "../../shared/labels";
+import { CameraPreview } from "../../shared/media/CameraPreview";
+import { CameraControl } from "../cameras/CameraControl";
+import { TimelineStrip } from "../timeline/TimelineStrip";
 
 export function Overview() {
-  const scope=useScope(),[selected,setSelected]=useState('');
-  const cameras=useApi('listCameras',{query:{limit:100}},{poll:5000}),entities=useApi('listEntities',{query:{limit:100}}),settings=useApi('getSettings');
-  const q=useApi('getOverview',{query:scope.query},{poll:scope.date===localDate()?30000:undefined});
-  const timeline=useApi('getTimeline',{query:{...scope.query,bucket_seconds:300}},{poll:scope.date===localDate()?30000:undefined});
-  const camera=cameras.data?.data.find(c=>c.id===selected)??cameras.data?.data[0];
-  const noCameras=cameras.isSuccess&&!cameras.data.data.length;
-  return <><PageHeading kicker="YOUR DAY / OVERVIEW" title={scope.date===localDate()?'今日概览':'活动概览'} description={`${dateLabel(scope.date)} · 活动来自画面观察，时长为估计值。`} action={<ScopeLink to="/reports" className="button secondary">查看报告<ArrowRight size={16}/></ScopeLink>}/><ScopePicker/>{noCameras?<Panel title="开始记录你的第一天" kicker="GET STARTED"><p className="muted">完成以下配置，等待第一分钟记录。每一步的状态来自服务器。</p><div className="setup-grid"><CheckItem done={Boolean(settings.data?.data.config.vision_provider_id)}><ScopeLink to="/settings/ai"><strong>01 配置 AI 服务</strong><span>测试图片与结构化输出能力</span><ChevronRight size={16}/></ScopeLink></CheckItem><CheckItem done={Boolean(entities.data?.data.some(e=>e.is_primary_subject&&e.references.some(r=>r.enabled)))}><ScopeLink to="/entities"><strong>02 添加参考资料</strong><span>设置主人物及适用机位</span><ChevronRight size={16}/></ScopeLink></CheckItem><CheckItem done={false}><ScopeLink to="/cameras/new"><strong>03 添加摄像头</strong><span>测试连接、设置计划与区域</span><ChevronRight size={16}/></ScopeLink></CheckItem><CheckItem done={false}><ScopeLink to="/cameras"><strong>04 预检并启用</strong><span>确认保存范围，等待首次记录</span><ChevronRight size={16}/></ScopeLink></CheckItem></div><ScopeLink className="button primary" to="/cameras/new"><Plus size={17}/>添加第一台摄像头</ScopeLink></Panel>:<div className="overview-top"><Panel className="preview-panel" kicker="CAMERA / LIVE VIEW" title="当前画面" action={<label className="sr-labeled-select"><span className="sr-only">预览机位</span><select value={camera?.id??''} onChange={e=>setSelected(e.target.value)}>{cameras.data?.data.map(c=><option value={c.id} key={c.id}>{c.name}</option>)}</select></label>}><QueryState query={cameras}>{()=>camera?<><CameraPreview camera={camera}/><div className="capture-footer"><Badge tone={camera.runtime.capture_state==='online'?'success':'neutral'} dot={camera.runtime.capture_state==='online'}>{captureLabel(camera.runtime)}</Badge><CameraControl camera={camera}/></div></>:null}</QueryState></Panel><Panel title="活动时长" kicker="TODAY / ACTIVITY" action={<Badge>抽样估计</Badge>}><QueryState query={q}>{({data})=><><div className="activity-headline"><span className="metric-value">{compactDuration(data.coverage.classified_ms??0)}</span><p>已归类有效活动 · {duration(data.coverage.classified_ms??0)}</p></div><ActivityChart items={data.activities}/><div className="uncertainty-grid"><div><span>无法判断</span><strong>{duration(data.coverage.unknown_ms??0,false)}</strong></div><div><span>等待分析</span><strong>{duration(data.coverage.unanalysed_ms??0,false)}</strong></div><div><span>采集缺口</span><strong>{duration(data.coverage.gap_ms??0,false)}</strong></div></div></>}</QueryState></Panel></div>}{!settings.data?.data.config.primary_subject_id&&entities.isSuccess&&<Notice>尚未指定主人物。可以按机位浏览，或在<ScopeLink to="/entities" className="text-link">人物与物品</ScopeLink>中建立档案；人物未确认的观察不会计入“我”的确定时长。</Notice>}{cameras.data?.data.length&&!settings.data?.data.config.vision_provider_id?<Notice tone="warning">摄像头可独立采集，AI 服务尚未配置；有画面的范围将等待分析。<ScopeLink to="/settings/ai" className="text-link">配置 AI 服务</ScopeLink></Notice>:null}<Panel title="时间覆盖" kicker="COVERAGE / BEIJING TIME" action={<ScopeLink className="text-link" to="/timeline">打开时间线<ArrowRight size={15}/></ScopeLink>}><QueryState query={q}>{({data})=><CoverageTrack coverage={data.coverage}/>}</QueryState><QueryState query={timeline}>{({data})=><TimelineStrip timeline={data}/>}</QueryState></Panel><div className="overview-bottom"><Panel title="最近事件" kicker="RECENT / EVENTS" action={<ScopeLink className="text-link" to="/timeline">查看全部<ArrowRight size={15}/></ScopeLink>}><QueryState query={q}>{({data})=>data.latest_events.length?<EventList events={data.latest_events} limit={10}/>:<EmptyState title="此范围尚无活动事件" description="已采集的画面可能仍在等待分析；请查看上方时间覆盖。" action={<ScopeLink to="/minutes" className="text-link">查看分钟记录</ScopeLink>}/>}</QueryState></Panel><Panel title="处理状态" kicker="PIPELINE / STATUS"><div className="pipeline"><div><span><Camera size={18}/></span><div><strong>采集画面</strong><p>{cameras.data?.data.length?`${cameras.data.data.filter(c=>c.runtime.capture_state==='online').length} / ${cameras.data.data.length} 台正在采集`:'尚未配置机位'}</p></div></div><div><span><ScanLine size={18}/></span><div><strong>活动分析</strong><p>{settings.data?.data.config.vision_provider_id?'已配置视觉服务':'等待配置视觉服务'}</p></div></div><div><span><Clock3 size={18}/></span><div><strong>现场图保存</strong><p>{settings.data?.data.config.frame_retention_minutes??'—'} 分钟 · 文字记录保留</p></div></div></div><ScopeLink className="text-link" to="/status">查看设备与任务<ArrowRight size={15}/></ScopeLink></Panel></div>{q.data?.data.warnings.map(w=><Notice tone="warning" key={w.code}>{w.message}</Notice>)}</>;
+  const scope = useScope(),
+    [selected, setSelected] = useState("");
+  const cameras = useApi(
+      "listCameras",
+      { query: { limit: 100 } },
+      { poll: 5000 },
+    ),
+    entities = useApi("listEntities", { query: { limit: 100 } }),
+    settings = useApi("getSettings");
+  const q = useApi(
+    "getOverview",
+    { query: scope.query },
+    { poll: scope.date === localDate() ? 30000 : undefined },
+  );
+  const timeline = useApi(
+    "getTimeline",
+    { query: { ...scope.query, bucket_seconds: 300 } },
+    { poll: scope.date === localDate() ? 30000 : undefined },
+  );
+  const camera =
+    cameras.data?.data.find((c) => c.id === selected) ?? cameras.data?.data[0];
+  const noCameras = cameras.isSuccess && !cameras.data.data.length;
+  return (
+    <>
+      <PageHeading
+        kicker="YOUR DAY / OVERVIEW"
+        title={scope.date === localDate() ? "今日概览" : "活动概览"}
+        description={`${dateLabel(scope.date)} · 活动来自画面观察，时长为估计值。`}
+        action={
+          <ScopeLink to="/reports" className="button secondary">
+            查看报告
+            <ArrowRight size={16} />
+          </ScopeLink>
+        }
+      />
+      <ScopePicker />
+      {noCameras ? (
+        <Panel title="开始记录你的第一天" kicker="GET STARTED">
+          <p className="muted">
+            完成以下配置，等待第一分钟记录。每一步的状态来自服务器。
+          </p>
+          <div className="setup-grid">
+            <CheckItem
+              done={Boolean(settings.data?.data.config.vision_provider_id)}
+            >
+              <ScopeLink to="/settings/ai">
+                <strong>01 配置 AI 服务</strong>
+                <span>测试图片与结构化输出能力</span>
+                <ChevronRight size={16} />
+              </ScopeLink>
+            </CheckItem>
+            <CheckItem
+              done={Boolean(
+                entities.data?.data.some(
+                  (e) =>
+                    e.is_primary_subject && e.references.some((r) => r.enabled),
+                ),
+              )}
+            >
+              <ScopeLink to="/entities">
+                <strong>02 添加参考资料</strong>
+                <span>设置主人物及适用机位</span>
+                <ChevronRight size={16} />
+              </ScopeLink>
+            </CheckItem>
+            <CheckItem done={false}>
+              <ScopeLink to="/cameras/new">
+                <strong>03 添加摄像头</strong>
+                <span>测试连接、设置计划与区域</span>
+                <ChevronRight size={16} />
+              </ScopeLink>
+            </CheckItem>
+            <CheckItem done={false}>
+              <ScopeLink to="/cameras">
+                <strong>04 预检并启用</strong>
+                <span>确认保存范围，等待首次记录</span>
+                <ChevronRight size={16} />
+              </ScopeLink>
+            </CheckItem>
+          </div>
+          <ScopeLink className="button primary" to="/cameras/new">
+            <Plus size={17} />
+            添加第一台摄像头
+          </ScopeLink>
+        </Panel>
+      ) : (
+        <div className="overview-top">
+          <Panel
+            className="preview-panel"
+            kicker="CAMERA / LIVE VIEW"
+            title="当前画面"
+            action={
+              <label className="sr-labeled-select">
+                <span className="sr-only">预览机位</span>
+                <select
+                  value={camera?.id ?? ""}
+                  onChange={(e) => setSelected(e.target.value)}
+                >
+                  {cameras.data?.data.map((c) => (
+                    <option value={c.id} key={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            }
+          >
+            <QueryState query={cameras}>
+              {() =>
+                camera ? (
+                  <>
+                    <CameraPreview camera={camera} />
+                    <div className="capture-footer">
+                      <Badge
+                        tone={
+                          camera.runtime.capture_state === "online"
+                            ? "success"
+                            : "neutral"
+                        }
+                        dot={camera.runtime.capture_state === "online"}
+                      >
+                        {captureLabel(camera.runtime)}
+                      </Badge>
+                      <CameraControl camera={camera} />
+                    </div>
+                  </>
+                ) : null
+              }
+            </QueryState>
+          </Panel>
+          <Panel
+            title="活动时长"
+            kicker="TODAY / ACTIVITY"
+            action={<Badge>抽样估计</Badge>}
+          >
+            <QueryState query={q}>
+              {({ data }) => (
+                <>
+                  <div className="activity-headline">
+                    <span className="metric-value">
+                      {compactDuration(data.coverage.classified_ms ?? 0)}
+                    </span>
+                    <p>
+                      已归类有效活动 ·{" "}
+                      {duration(data.coverage.classified_ms ?? 0)}
+                    </p>
+                  </div>
+                  <ActivityChart items={data.activities} />
+                  <div className="uncertainty-grid">
+                    <div>
+                      <span>无法判断</span>
+                      <strong>
+                        {duration(data.coverage.unknown_ms ?? 0, false)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>等待分析</span>
+                      <strong>
+                        {duration(data.coverage.unanalysed_ms ?? 0, false)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>采集缺口</span>
+                      <strong>
+                        {duration(data.coverage.gap_ms ?? 0, false)}
+                      </strong>
+                    </div>
+                  </div>
+                </>
+              )}
+            </QueryState>
+          </Panel>
+        </div>
+      )}
+      {!settings.data?.data.config.primary_subject_id && entities.isSuccess && (
+        <Notice>
+          尚未指定主人物。可以按机位浏览，或在
+          <ScopeLink to="/entities" className="text-link">
+            人物与物品
+          </ScopeLink>
+          中建立档案；人物未确认的观察不会计入“我”的确定时长。
+        </Notice>
+      )}
+      {cameras.data?.data.length &&
+      !settings.data?.data.config.vision_provider_id ? (
+        <Notice tone="warning">
+          摄像头可独立采集，AI 服务尚未配置；有画面的范围将等待分析。
+          <ScopeLink to="/settings/ai" className="text-link">
+            配置 AI 服务
+          </ScopeLink>
+        </Notice>
+      ) : null}
+      <Panel
+        title="时间覆盖"
+        kicker="COVERAGE / BEIJING TIME"
+        action={
+          <ScopeLink className="text-link" to="/timeline">
+            打开时间线
+            <ArrowRight size={15} />
+          </ScopeLink>
+        }
+      >
+        <QueryState query={q}>
+          {({ data }) => <CoverageTrack coverage={data.coverage} />}
+        </QueryState>
+        <QueryState query={timeline}>
+          {({ data }) => (
+            <TimelineStrip
+              timeline={data}
+              displayFrom={scope.query.from}
+              displayTo={scope.query.to}
+            />
+          )}
+        </QueryState>
+      </Panel>
+      <div className="overview-bottom">
+        <Panel
+          title="最近事件"
+          kicker="RECENT / EVENTS"
+          action={
+            <ScopeLink className="text-link" to="/timeline">
+              查看全部
+              <ArrowRight size={15} />
+            </ScopeLink>
+          }
+        >
+          <QueryState query={q}>
+            {({ data }) =>
+              data.latest_events.length ? (
+                <EventList events={data.latest_events} limit={10} />
+              ) : (
+                <EmptyState
+                  title="此范围尚无活动事件"
+                  description="已采集的画面可能仍在等待分析；请查看上方时间覆盖。"
+                  action={
+                    <ScopeLink to="/minutes" className="text-link">
+                      查看分钟记录
+                    </ScopeLink>
+                  }
+                />
+              )
+            }
+          </QueryState>
+        </Panel>
+        <Panel title="处理状态" kicker="PIPELINE / STATUS">
+          <div className="pipeline">
+            <div>
+              <span>
+                <Camera size={18} />
+              </span>
+              <div>
+                <strong>采集画面</strong>
+                <p>
+                  {cameras.data?.data.length
+                    ? `${cameras.data.data.filter((c) => c.runtime.capture_state === "online").length} / ${cameras.data.data.length} 台正在采集`
+                    : "尚未配置机位"}
+                </p>
+              </div>
+            </div>
+            <div>
+              <span>
+                <ScanLine size={18} />
+              </span>
+              <div>
+                <strong>活动分析</strong>
+                <p>
+                  {settings.data?.data.config.vision_provider_id
+                    ? "已配置视觉服务"
+                    : "等待配置视觉服务"}
+                </p>
+              </div>
+            </div>
+            <div>
+              <span>
+                <Clock3 size={18} />
+              </span>
+              <div>
+                <strong>现场图保存</strong>
+                <p>
+                  {settings.data?.data.config.frame_retention_minutes ?? "—"}{" "}
+                  分钟 · 文字记录保留
+                </p>
+              </div>
+            </div>
+          </div>
+          <ScopeLink className="text-link" to="/status">
+            查看设备与任务
+            <ArrowRight size={15} />
+          </ScopeLink>
+        </Panel>
+      </div>
+      {q.data?.data.warnings.map((w) => (
+        <Notice tone="warning" key={w.code}>
+          {w.message}
+        </Notice>
+      ))}
+    </>
+  );
 }

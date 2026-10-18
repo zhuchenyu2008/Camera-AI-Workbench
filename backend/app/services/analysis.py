@@ -41,6 +41,10 @@ class Analysis:
         start, end = timestamp(dto.from_), timestamp(dto.to)
         for camera in dto.camera_ids:
             one(conn, s.cameras, camera, deleted=True)
+        if dto.subject_id:
+            subject = one(conn, s.entities, dto.subject_id)
+            if subject["kind"] != "person":
+                raise AppError(422, "VALIDATION_ERROR", "汇总主体必须是人物")
         refset = self.w.assets.reference_set(conn, sorted(set(dto.camera_ids)))
         frames = self.available(conn, dto.camera_ids, start, end) if dto.mode == "visual" else []
         ranges = (
@@ -102,7 +106,7 @@ class Analysis:
         if dto.mode == "records_only":
             payload = {
                 "camera_ids": sorted(set(dto.camera_ids)),
-                "subject_id": None,
+                "subject_id": dto.subject_id,
                 "start": timestamp(dto.from_),
                 "end": timestamp(dto.to),
                 "reference_set_id": refset["id"],

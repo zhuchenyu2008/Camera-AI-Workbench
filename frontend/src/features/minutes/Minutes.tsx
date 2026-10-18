@@ -1,22 +1,390 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
-import { useApi } from '../../api/query';
-import { analysisLabels, evidenceLabels, modeLabels } from '../../shared/labels';
-import { clock, duration, localDate } from '../../shared/time';
-import { BackLink, Badge, Button, CoverageTrack, EmptyState, Notice, PageHeading, Pager, Panel, QueryState, RevisionBanner, RevisionPicker, ScopeLink, ScopePicker, SourceLinks, useScope, JobProgress } from '../../shared/components';
-import { EvidenceViewer } from '../../shared/media/EvidenceViewer';
-import { AnalysisDialog } from '../analysis/AnalysisDialog';
+import { useState } from "react";
+import { useParams } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
+import { useApi } from "../../api/query";
+import {
+  analysisLabels,
+  evidenceLabels,
+  modeLabels,
+} from "../../shared/labels";
+import { clock, duration, localDate } from "../../shared/time";
+import {
+  BackLink,
+  Badge,
+  Button,
+  CoverageTrack,
+  EmptyState,
+  Notice,
+  PageHeading,
+  Pager,
+  Panel,
+  QueryState,
+  RevisionBanner,
+  RevisionPicker,
+  ScopeLink,
+  ScopePicker,
+  SourceLinks,
+  useScope,
+  JobProgress,
+} from "../../shared/components";
+import { EvidenceViewer } from "../../shared/media/EvidenceViewer";
+import { AnalysisDialog } from "../analysis/AnalysisDialog";
 
 export function Minutes() {
-  const scope=useScope(),cameras=useApi('listCameras',{query:{limit:100}}),multi=scope.camera_ids.length>1;
-  const q=useApi('listMinutes',{query:{from:scope.query.from,to:scope.query.to,camera_id:scope.camera_ids[0],analysis_state:scope.search.get('analysis_state'),cursor:scope.search.get('cursor'),limit:50}},{enabled:!multi,poll:scope.date===localDate()?30000:undefined});
-  return <><PageHeading kicker="RECORDS / MINUTE BY MINUTE" title="分钟记录" description="先看观察摘要，再按秒查看画面依据。"/><ScopePicker person={false} cameras={false}/><Panel title="采集与分析记录" action={<div className="actions"><label className="inline-field">机位<select aria-label="分钟机位" value={multi?'multi':scope.camera_ids[0]??''} onChange={e=>scope.update('camera_ids',e.target.value?[e.target.value]:[])}><option value="">全部机位</option>{multi&&<option value="multi">请选择单台机位</option>}{cameras.data?.data.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="inline-field">分析状态<select aria-label="分钟分析状态" value={scope.search.get('analysis_state')??''} onChange={e=>scope.update('analysis_state',e.target.value)}><option value="">全部状态</option>{Object.entries(analysisLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label></div>}>{multi?<Notice>分钟接口支持单机位或全部机位。请选择一台机位，或明确切换到全部机位；当前多机位范围不会被静默替换。</Notice>:<QueryState query={q}>{({data,page})=><>{data.length?data.map(m=><ScopeLink className="minute-row" key={m.id} to={`/minutes/${m.id}`}><div><div className="row-wrap"><strong>{clock(m.start_at)}—{clock(m.end_at)}</strong><span className="caption muted">{cameras.data?.data.find(c=>c.id===m.camera_id)?.name??'已删除机位'}</span></div><p>{m.description||'尚无已完成的观察描述'}</p><div className="row-wrap"><Badge tone={m.analysis_state==='complete'?'success':m.analysis_state==='failed'?'danger':'neutral'}>{analysisLabels[m.analysis_state]}</Badge><span className="caption muted">{m.analysis_mode?modeLabels[m.analysis_mode]:'模式待确定'} · {evidenceLabels[m.evidence_state]}</span></div></div><ChevronRight size={18}/></ScopeLink>):<EmptyState title="此范围没有分钟记录" description="检查机位的运行计划、采集状态，或切换日期和状态筛选。"/>}<Pager hasMore={page.has_more} nextCursor={page.next_cursor}/></>}</QueryState>}</Panel></>;
+  const scope = useScope(),
+    cameras = useApi("listCameras", { query: { limit: 100 } }),
+    multi = scope.camera_ids.length > 1;
+  const q = useApi(
+    "listMinutes",
+    {
+      query: {
+        from: scope.query.from,
+        to: scope.query.to,
+        camera_id: scope.camera_ids[0],
+        analysis_state: scope.search.get("analysis_state"),
+        cursor: scope.search.get("cursor"),
+        limit: 50,
+      },
+    },
+    { enabled: !multi, poll: scope.date === localDate() ? 30000 : undefined },
+  );
+  return (
+    <>
+      <PageHeading
+        kicker="RECORDS / MINUTE BY MINUTE"
+        title="分钟记录"
+        description="先看观察摘要，再按秒查看画面依据。"
+      />
+      <ScopePicker person={false} cameras={false} />
+      <Panel
+        title="采集与分析记录"
+        action={
+          <div className="actions">
+            <label className="inline-field">
+              机位
+              <select
+                aria-label="分钟机位"
+                value={multi ? "multi" : (scope.camera_ids[0] ?? "")}
+                onChange={(e) =>
+                  scope.update(
+                    "camera_ids",
+                    e.target.value ? [e.target.value] : [],
+                  )
+                }
+              >
+                <option value="">全部机位</option>
+                {multi && <option value="multi">请选择单台机位</option>}
+                {cameras.data?.data.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="inline-field">
+              分析状态
+              <select
+                aria-label="分钟分析状态"
+                value={scope.search.get("analysis_state") ?? ""}
+                onChange={(e) => scope.update("analysis_state", e.target.value)}
+              >
+                <option value="">全部状态</option>
+                {Object.entries(analysisLabels).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        }
+      >
+        {multi ? (
+          <Notice>
+            分钟接口支持单机位或全部机位。请选择一台机位，或明确切换到全部机位；当前多机位范围不会被静默替换。
+          </Notice>
+        ) : (
+          <QueryState query={q}>
+            {({ data, page }) => (
+              <>
+                {data.length ? (
+                  data.map((m) => (
+                    <ScopeLink
+                      className="minute-row"
+                      key={m.id}
+                      to={`/minutes/${m.id}`}
+                    >
+                      <div>
+                        <div className="row-wrap">
+                          <strong>
+                            {clock(m.start_at)}—{clock(m.end_at)}
+                          </strong>
+                          <span className="caption muted">
+                            {cameras.data?.data.find(
+                              (c) => c.id === m.camera_id,
+                            )?.name ?? "已删除机位"}
+                          </span>
+                        </div>
+                        <p>{m.description || "尚无已完成的观察描述"}</p>
+                        <div className="row-wrap">
+                          <Badge
+                            tone={
+                              m.analysis_state === "complete"
+                                ? "success"
+                                : m.analysis_state === "failed"
+                                  ? "danger"
+                                  : "neutral"
+                            }
+                          >
+                            {analysisLabels[m.analysis_state]}
+                          </Badge>
+                          <span className="caption muted">
+                            {m.analysis_mode
+                              ? modeLabels[m.analysis_mode]
+                              : "模式待确定"}{" "}
+                            · {evidenceLabels[m.evidence_state]}
+                          </span>
+                        </div>
+                      </div>
+                      <ChevronRight size={18} />
+                    </ScopeLink>
+                  ))
+                ) : (
+                  <EmptyState
+                    title="此范围没有分钟记录"
+                    description="检查机位的运行计划、采集状态，或切换日期和状态筛选。"
+                  />
+                )}
+                <Pager hasMore={page.has_more} nextCursor={page.next_cursor} />
+              </>
+            )}
+          </QueryState>
+        )}
+      </Panel>
+    </>
+  );
 }
 export function MinuteDetail() {
-  const {minuteId=''}=useParams(),scope=useScope(),revision=Number(scope.search.get('revision'))||undefined;
-  const q=useApi('getMinute',{path:{minute_id:minuteId},query:{revision}}),slots=useApi('listMinuteEvidence',{path:{minute_id:minuteId},query:{limit:60}});
-  const [index,setIndex]=useState<number|null>(null),[analysis,setAnalysis]=useState<'visual'|'records_only'|null>(null);
-  const ids=slots.data?.data.filter(s=>s.evidence_id).map(s=>s.evidence_id!)??[];
-  return <><BackLink to="/minutes" label="返回分钟记录"/><QueryState query={q}>{({data:m})=><><PageHeading title={`${clock(m.start_at)} 的分钟记录`} description={`${analysisLabels[m.analysis_state]} · ${m.analysis_mode?modeLabels[m.analysis_mode]:'尚无分析模式'} · 北京时间`} action={m.revision>0?<RevisionPicker current={m.revision} versions={m.versions?.map(v=>Number(v.revision)).filter(n=>n>0)}/>:undefined}/><RevisionBanner revision={m.revision} historical={revision!=null} onCurrent={()=>scope.update('revision','')}/>{m.revision===0&&<Notice>本分钟尚无分析版本。当前只读取采集详情，不使用 revision=0 查询历史。</Notice>}<div className="detail-columns"><div className="stack"><Panel title="观察记录" action={<Badge>{evidenceLabels[m.evidence_state]}</Badge>}><p className="observation">{m.description||'有画面，但此段尚未完成分析。'}</p><CoverageTrack coverage={m.coverage}/><dl className="definition-list"><div><dt>实际采集秒槽</dt><dd>{String(m.sampling.captured_frame_count??'未知')} / {String(m.sampling.target_frame_count??'未知')}</dd></div><div><dt>实际提交分析图片</dt><dd>{String(m.sampling.submitted_frame_count??'未知')} 张</dd></div><div><dt>成功分析依据</dt><dd>{String(m.sampling.successful_frame_count??'未知')} 张</dd></div></dl><p className="caption muted">采集图片数不代表模型读取数量。稀疏分析保留采样间的不确定性。</p></Panel><Panel title="每秒证据" action={<span className="caption muted">00—59 秒 · 元数据先行</span>}><QueryState query={slots}>{({data})=>data.length?<><div className="evidence-grid">{data.map((s,i)=><button key={s.slot_at} className={`evidence-slot ${s.slot_state}`} disabled={!s.evidence_id} onClick={()=>setIndex(ids.indexOf(s.evidence_id!))} aria-label={`${clock(s.slot_at,true)}，${evidenceLabels[s.slot_state]}`} title={`${clock(s.slot_at,true)} ${evidenceLabels[s.slot_state]}`}><strong>{clock(s.slot_at,true).slice(-2)}</strong><span>{s.slot_state==='available'?'可查看':evidenceLabels[s.slot_state].replace('原图已','').replace('空间不足','')}</span></button>)}</div><p className="caption muted" style={{marginTop:16}}>可查看 / 过期 / 提前回收 / 文件缺失 / 未采到 / 计划外。计划外不计入采集缺口。</p></>:<EmptyState title="计划外无秒槽" description="此分钟不在运行计划内，没有应采集的图片。"/>}</QueryState></Panel><Panel title="活动片段"><div className="stack">{m.segments.length?m.segments.map(s=><div className="inset" key={s.id}><div className="row-between"><strong>{clock(s.start_at,true)}—{clock(s.end_at,true)}</strong><span>{duration(s.duration_ms)}</span></div><p className="observation">{s.observation}</p><Badge>{s.origin==='manual'?'人工修订':'AI 观察'} · {modeLabels[s.support]}</Badge></div>):<p className="muted">尚无已完成的活动片段。</p>}</div></Panel></div><div className="stack"><Panel title="操作与任务"><div className="stack"><Button disabled={revision!=null||!['available','partial'].includes(m.evidence_state)} onClick={()=>setAnalysis('visual')}>用仍有效的原图重新分析</Button><Button onClick={()=>setAnalysis('records_only')}>按现有记录重新汇总</Button>{m.pending_job_id&&<JobProgress id={m.pending_job_id}/>}</div></Panel><Panel title="来源与版本"><dl className="definition-list"><div><dt>模型版本</dt><dd>{m.model_version??'尚无'}</dd></div><div><dt>参考集</dt><dd className="mono">{m.reference_set_id??'尚无'}</dd></div><div><dt>人工修订</dt><dd>{m.has_manual_revision?'是':'否'}</dd></div></dl><ScopeLink className="text-link" to={`/timeline?date=${m.start_at?scope.date:''}&camera_ids=${encodeURIComponent(m.camera_id)}`}>查看关联活动时间线</ScopeLink></Panel></div></div>{analysis&&<AnalysisDialog mode={analysis} cameraIds={[m.camera_id]} from={m.start_at} to={m.end_at} onClose={()=>setAnalysis(null)}/>}</>}</QueryState>{index!=null&&<EvidenceViewer ids={ids} index={index} onIndex={setIndex} onClose={()=>setIndex(null)}/>}</>;
+  const { minuteId = "" } = useParams(),
+    scope = useScope(),
+    revision = Number(scope.search.get("revision")) || undefined;
+  const q = useApi("getMinute", {
+      path: { minute_id: minuteId },
+      query: { revision },
+    }),
+    slots = useApi("listMinuteEvidence", {
+      path: { minute_id: minuteId },
+      query: { limit: 60 },
+    });
+  const [index, setIndex] = useState<number | null>(null),
+    [analysis, setAnalysis] = useState<"visual" | "records_only" | null>(null);
+  const ids =
+    slots.data?.data.filter((s) => s.evidence_id).map((s) => s.evidence_id!) ??
+    [];
+  return (
+    <>
+      <BackLink to="/minutes" label="返回分钟记录" />
+      <QueryState query={q}>
+        {({ data: m }) => (
+          <>
+            <PageHeading
+              title={`${clock(m.start_at)} 的分钟记录`}
+              description={`${analysisLabels[m.analysis_state]} · ${m.analysis_mode ? modeLabels[m.analysis_mode] : "尚无分析模式"} · 北京时间`}
+              action={
+                m.revision > 0 ? (
+                  <RevisionPicker
+                    current={m.revision}
+                    versions={m.versions
+                      ?.map((v) => Number(v.revision))
+                      .filter((n) => n > 0)}
+                  />
+                ) : undefined
+              }
+            />
+            <RevisionBanner
+              revision={m.revision}
+              historical={revision != null}
+              onCurrent={() => scope.update("revision", "")}
+            />
+            {m.revision === 0 && (
+              <Notice>
+                本分钟尚无分析版本。当前只读取采集详情，不使用 revision=0
+                查询历史。
+              </Notice>
+            )}
+            <div className="detail-columns">
+              <div className="stack">
+                <Panel
+                  title="观察记录"
+                  action={<Badge>{evidenceLabels[m.evidence_state]}</Badge>}
+                >
+                  <p className="observation">
+                    {m.description || "有画面，但此段尚未完成分析。"}
+                  </p>
+                  <CoverageTrack coverage={m.coverage} />
+                  <dl className="definition-list">
+                    <div>
+                      <dt>实际采集秒槽</dt>
+                      <dd>
+                        {String(m.sampling.captured_frame_count ?? "未知")} /{" "}
+                        {String(m.sampling.target_frame_count ?? "未知")}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>实际提交分析图片</dt>
+                      <dd>
+                        {String(m.sampling.submitted_frame_count ?? "未知")} 张
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>成功分析依据</dt>
+                      <dd>
+                        {String(m.sampling.successful_frame_count ?? "未知")} 张
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="caption muted">
+                    采集图片数不代表模型读取数量。稀疏分析保留采样间的不确定性。
+                  </p>
+                </Panel>
+                <Panel
+                  title="每秒证据"
+                  action={
+                    <span className="caption muted">00—59 秒 · 元数据先行</span>
+                  }
+                >
+                  <QueryState query={slots}>
+                    {({ data }) =>
+                      data.length ? (
+                        <>
+                          <div className="evidence-grid">
+                            {data.map((s, i) => (
+                              <button
+                                key={s.slot_at}
+                                className={`evidence-slot ${s.slot_state}`}
+                                disabled={!s.evidence_id}
+                                onClick={() =>
+                                  setIndex(ids.indexOf(s.evidence_id!))
+                                }
+                                aria-label={`${clock(s.slot_at, true)}，${evidenceLabels[s.slot_state]}`}
+                                title={`${clock(s.slot_at, true)} ${evidenceLabels[s.slot_state]}`}
+                              >
+                                <strong>
+                                  {clock(s.slot_at, true).slice(-2)}
+                                </strong>
+                                <span>
+                                  {s.slot_state === "available"
+                                    ? "可查看"
+                                    : evidenceLabels[s.slot_state]
+                                        .replace("原图已", "")
+                                        .replace("空间不足", "")}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                          <p
+                            className="caption muted"
+                            style={{ marginTop: 16 }}
+                          >
+                            可查看 / 过期 / 提前回收 / 文件缺失 / 未采到 /
+                            计划外。计划外不计入采集缺口。
+                          </p>
+                        </>
+                      ) : (
+                        <EmptyState
+                          title="计划外无秒槽"
+                          description="此分钟不在运行计划内，没有应采集的图片。"
+                        />
+                      )
+                    }
+                  </QueryState>
+                </Panel>
+                <Panel title="活动片段">
+                  <div className="stack">
+                    {m.segments.length ? (
+                      m.segments.map((s) => (
+                        <div className="inset" key={s.id}>
+                          <div className="row-between">
+                            <strong>
+                              {clock(s.start_at, true)}—{clock(s.end_at, true)}
+                            </strong>
+                            <span>{duration(s.duration_ms)}</span>
+                          </div>
+                          <p className="observation">{s.observation}</p>
+                          <Badge>
+                            {s.origin === "manual" ? "人工修订" : "AI 观察"} ·{" "}
+                            {modeLabels[s.support]}
+                          </Badge>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="muted">尚无已完成的活动片段。</p>
+                    )}
+                  </div>
+                </Panel>
+              </div>
+              <div className="stack">
+                <Panel title="操作与任务">
+                  <div className="stack">
+                    <Button
+                      disabled={
+                        revision != null ||
+                        !["available", "partial"].includes(m.evidence_state)
+                      }
+                      onClick={() => setAnalysis("visual")}
+                    >
+                      用仍有效的原图重新分析
+                    </Button>
+                    <Button onClick={() => setAnalysis("records_only")}>
+                      按现有记录重新汇总
+                    </Button>
+                    {m.pending_job_id && <JobProgress id={m.pending_job_id} />}
+                  </div>
+                </Panel>
+                <Panel title="来源与版本">
+                  <dl className="definition-list">
+                    <div>
+                      <dt>模型版本</dt>
+                      <dd>{m.model_version ?? "尚无"}</dd>
+                    </div>
+                    <div>
+                      <dt>参考集</dt>
+                      <dd className="mono">{m.reference_set_id ?? "尚无"}</dd>
+                    </div>
+                    <div>
+                      <dt>人工修订</dt>
+                      <dd>{m.has_manual_revision ? "是" : "否"}</dd>
+                    </div>
+                  </dl>
+                  <ScopeLink
+                    className="text-link"
+                    to={`/timeline?date=${m.start_at ? scope.date : ""}&camera_ids=${encodeURIComponent(m.camera_id)}`}
+                  >
+                    查看关联活动时间线
+                  </ScopeLink>
+                </Panel>
+              </div>
+            </div>
+            {analysis && (
+              <AnalysisDialog
+                mode={analysis}
+                cameraIds={[m.camera_id]}
+                from={m.start_at}
+                to={m.end_at}
+                onClose={() => setAnalysis(null)}
+              />
+            )}
+          </>
+        )}
+      </QueryState>
+      {index != null && (
+        <EvidenceViewer
+          ids={ids}
+          index={index}
+          onIndex={setIndex}
+          onClose={() => setIndex(null)}
+        />
+      )}
+    </>
+  );
 }

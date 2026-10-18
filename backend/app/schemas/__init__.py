@@ -527,6 +527,7 @@ class AnalysisRequest(Strict):
     to: AwareDatetime
     reference_policy: Literal["current"] = "current"
     allow_partial: bool = False
+    subject_id: str | None = None
 
     @model_validator(mode="after")
     def check(self):
