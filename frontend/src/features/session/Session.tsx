@@ -41,7 +41,7 @@ export function Login() {
         </div>
         <span className="caption">
           <ShieldCheck size={16} />
-          同源加密连接 · 图片按保留期到期
+          同源会话保护 · 图片按保留期到期
         </span>
       </div>
       <main className="login-form">

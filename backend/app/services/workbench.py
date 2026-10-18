@@ -245,6 +245,13 @@ class Workbench:
         )
 
     def validate_source(self, source: dict):
+        if source["host"] not in self.config.rtsp_allowed_hosts:
+            raise AppError(
+                422,
+                "VALIDATION_ERROR",
+                "RTSP 主机不在部署允许清单中",
+                fields=[{"path": "source.host", "code": "not_allowed", "message": "主机不在白名单中"}],
+            )
         if source["port"] not in self.config.rtsp_allowed_ports:
             raise AppError(
                 422,

@@ -2,6 +2,8 @@
 
 React + TypeScript + Vite + React Router + TanStack Query，按根目录 `DESIGN.md` 和 `docs/03-前端详细设计与交互规范.md` 实现。正式应用只使用真实同源 API，没有 Demo 数据或模拟成功开关。所有业务时间显示为北京时间。
 
+需要连自己的摄像头时，在仓库根目录运行 `./start-local.ps1 -Install`；它会一起启动真实后端、worker 和本前端，配置及历史数据保存在 `data/local/`。后续使用 `./start-local.ps1`，停止使用 `./start-local.ps1 -Stop`。下方的临时浏览器验收环境只用于自动测试。
+
 ```powershell
 cd frontend
 npm ci
@@ -9,7 +11,7 @@ npm run generate
 npm run dev
 ```
 
-开发入口 `http://127.0.0.1:5173`，`/api` 默认代理到 `http://127.0.0.1:8000`。可用 `CAW_DEV_API` 改变开发代理目标。实际服务要求 HTTPS 与安全 Cookie；请将开发入口放在配置匹配的 HTTPS 反向代理后。专用自动验收脚本使用独立临时数据库与本机测试配置，不修改正式安全设置。
+开发入口 `http://127.0.0.1:5173`，`/api` 默认代理到 `http://127.0.0.1:8000`。可用 `CAW_DEV_API` 改变开发代理目标。本机启动脚本通过 `CAW_LOCAL_DEV=1` 和精确的回环 Origin 启用 HTTP 开发会话；独立运行 Vite 时需要自行启动、配置后端和 worker。正式部署要求 HTTPS 与 Secure Cookie。专用自动验收脚本使用独立临时数据库与本机测试配置，不修改正式安全设置。
 
 ```powershell
 npm run typecheck

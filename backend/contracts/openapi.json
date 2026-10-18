@@ -14762,7 +14762,8 @@
         "properties": {
           "host": {
             "type": "string",
-            "const": "127.0.0.1",
+            "maxLength": 15,
+            "minLength": 7,
             "title": "Host",
             "default": "127.0.0.1"
           },
@@ -14821,7 +14822,8 @@
             "anyOf": [
               {
                 "type": "string",
-                "const": "127.0.0.1"
+                "maxLength": 15,
+                "minLength": 7
               },
               {
                 "type": "null"
