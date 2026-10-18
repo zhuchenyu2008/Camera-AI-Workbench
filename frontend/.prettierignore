@@ -1,0 +1,5 @@
+node_modules
+dist
+.test-output
+src/api/generated
+src/test/fixtures

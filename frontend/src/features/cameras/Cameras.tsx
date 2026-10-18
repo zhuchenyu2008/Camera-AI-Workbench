@@ -1,0 +1,116 @@
+import { Camera, Plus } from "lucide-react";
+import { useApi } from "../../api/query";
+import {
+  Badge,
+  EmptyState,
+  PageHeading,
+  Pager,
+  Panel,
+  QueryState,
+  ScopeLink,
+  useScope,
+} from "../../shared/components";
+import { captureLabel } from "../../shared/labels";
+import { clock } from "../../shared/time";
+import { CameraControl } from "./CameraControl";
+export function Cameras() {
+  const scope = useScope(),
+    q = useApi(
+      "listCameras",
+      { query: { limit: 50, cursor: scope.search.get("cursor") } },
+      { poll: 5000 },
+    );
+  return (
+    <>
+      <PageHeading
+        kicker="MANAGE / CAMERAS"
+        title="摄像头"
+        description="运行计划、实际采集状态与保存期限。"
+        action={
+          <ScopeLink className="button primary" to="/cameras/new">
+            <Plus size={17} />
+            添加摄像头
+          </ScopeLink>
+        }
+      />
+      <Panel
+        title="机位列表"
+        action={<span className="caption muted">列表不自动播放视频</span>}
+      >
+        <QueryState query={q}>
+          {({ data, page }) => (
+            <>
+              {data.length ? (
+                <div className="resource-list">
+                  {data.map((c) => (
+                    <div className="resource-row" key={c.id}>
+                      <span className="resource-thumbnail">
+                        <Camera size={26} strokeWidth={1.4} />
+                      </span>
+                      <div>
+                        <ScopeLink to={`/cameras/${c.id}`}>
+                          <h3>{c.name}</h3>
+                        </ScopeLink>
+                        <div className="row-wrap">
+                          <Badge
+                            tone={
+                              c.runtime.capture_state === "online"
+                                ? "success"
+                                : c.runtime.capture_state === "offline"
+                                  ? "warning"
+                                  : "neutral"
+                            }
+                            dot={c.runtime.capture_state === "online"}
+                          >
+                            {captureLabel(c.runtime)}
+                          </Badge>
+                          <Badge>{c.enabled ? "已启用" : "停用草稿"}</Badge>
+                        </div>
+                        <div className="resource-meta">
+                          <span>
+                            最近帧 {clock(c.runtime.last_frame_at, true)}
+                          </span>
+                          <span>保留 {c.effective_retention_minutes} 分钟</span>
+                          <span>
+                            {c.schedule.length
+                              ? `${c.schedule.length} 条周计划`
+                              : "无自动运行计划"}
+                          </span>
+                          {c.runtime.override_expires_at && (
+                            <span>
+                              临时覆盖至 {clock(c.runtime.override_expires_at)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="actions">
+                        <CameraControl camera={c} />
+                        <ScopeLink
+                          className="button secondary"
+                          to={`/cameras/${c.id}`}
+                        >
+                          配置机位
+                        </ScopeLink>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="添加第一台摄像头"
+                  description="来源先保存为停用草稿，通过测试与启用预检后开始采集。"
+                  action={
+                    <ScopeLink className="button primary" to="/cameras/new">
+                      添加摄像头
+                    </ScopeLink>
+                  }
+                />
+              )}
+              <Pager hasMore={page.has_more} nextCursor={page.next_cursor} />
+            </>
+          )}
+        </QueryState>
+      </Panel>
+    </>
+  );
+}

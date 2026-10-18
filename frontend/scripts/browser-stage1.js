@@ -1,0 +1,229 @@
+async (page) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const checks = [];
+  const assert = (ok, message) => {
+    if (!ok) throw new Error(message);
+    checks.push(message);
+  };
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("http://127.0.0.1:5173/login");
+  await page
+    .getByRole("textbox", { name: "用户名", exact: true })
+    .fill("frontend-test");
+  await page
+    .getByRole("textbox", { name: "密码", exact: true })
+    .fill("incorrect-test-password");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await page.locator('[role="alert"]').waitFor();
+  assert(
+    (await page
+      .getByRole("textbox", { name: "密码", exact: true })
+      .inputValue()) === "",
+    "F01 错误密码被清空",
+  );
+  assert(
+    (await page
+      .getByRole("textbox", { name: "用户名", exact: true })
+      .inputValue()) === "frontend-test",
+    "F01 用户名保留",
+  );
+  await page
+    .getByRole("textbox", { name: "密码", exact: true })
+    .fill("frontend-browser-test-2026");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await page.getByRole("heading", { name: "今日概览", exact: true }).waitFor();
+  await page.locator(".time-bucket").first().waitFor({ timeout: 30000 });
+  assert(
+    await page.evaluate(() => localStorage.length === 0),
+    "F01 无登录令牌持久缓存",
+  );
+  assert(
+    (await page.locator(".bottom-nav a").count()) === 4,
+    "F13 手机底部四项导航",
+  );
+  assert(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    "F13 390px 无页面横向溢出",
+  );
+  const state = await (
+    await page.request.get("http://127.0.0.1:5173/api/_test/state")
+  ).json();
+  const slots = await (
+    await page.request.get(
+      "http://127.0.0.1:5173/api/minutes/" +
+        state.minute +
+        "/evidence?limit=60",
+    )
+  ).json();
+  const evidenceIndex = slots.data.findIndex(
+    (s) => s.slot_state === "available",
+  );
+  state.evidence = slots.data[evidenceIndex].evidence_id;
+  const session = await (
+    await page.request.get("http://127.0.0.1:5173/api/session")
+  ).json();
+  const overview = await (
+    await page.request.get("http://127.0.0.1:5173/api/overview", {
+      params: {
+        from: "2026-10-17T16:00:00Z",
+        to: "2026-10-18T16:00:00Z",
+        subject_id: state.person,
+      },
+    })
+  ).json();
+  const c = overview.data.coverage;
+  assert(
+    c.classified_ms + c.unknown_ms + c.unanalysed_ms + c.gap_ms ===
+      c.planned_ms,
+    "F05 后端四类覆盖守恒",
+  );
+  assert(
+    Date.parse(overview.data.to) <= Date.parse(overview.meta.server_time),
+    "F10 今日统计排除未来计划",
+  );
+  await page.screenshot({
+    path: "output/playwright/overview-390.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1080 });
+  await page.waitForFunction(
+    () => {
+      const v = document.querySelector("video");
+      return v && v.readyState >= 2;
+    },
+    {},
+    { timeout: 25000 },
+  );
+  assert(
+    (await page.locator("video").count()) === 1,
+    "F04 实际后端 HLS 在浏览器播放，只有一路",
+  );
+  await page.screenshot({
+    path: "output/playwright/overview-1440.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "使用快照", exact: true }).click();
+  await page.locator("img.preview-image").waitFor();
+  let snapshots = 0;
+  const watch = (req) => {
+    if (req.url().includes("/snapshot")) snapshots++;
+  };
+  page.on("request", watch);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  const hidden = snapshots;
+  await page.waitForTimeout(2200);
+  assert(snapshots === hidden, "F04/F14 页面隐藏后快照请求停止");
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.locator("img.preview-image").waitFor();
+  await page.goto(
+    "http://127.0.0.1:5173/timeline?date=2026-10-18&subject_id=" + state.person,
+  );
+  await page.locator(".event-row").first().waitFor();
+  const before = snapshots;
+  await page.waitForTimeout(1800);
+  assert(snapshots === before, "F04 离开预览路由后无残留快照请求");
+  page.off("request", watch);
+  await page.getByLabel("活动筛选", { exact: true }).selectOption("writing");
+  await page.waitForFunction(() => {
+    const rows = [...document.querySelectorAll(".event-main strong")];
+    return rows.length > 0 && rows.every((x) => x.textContent === "书写");
+  });
+  assert(
+    new URL(page.url()).searchParams.get("activity") === "writing",
+    "F05 活动筛选写 URL 且影响内容",
+  );
+  await page.getByLabel("活动筛选", { exact: true }).selectOption("");
+  await page.locator('a.event-row[href*="' + state.event + '"]').click();
+  await page.getByRole("dialog", { name: "活动详情", exact: true }).waitFor();
+  await page
+    .getByRole("dialog", { name: "活动详情", exact: true })
+    .getByText(/中间 20 秒/)
+    .waitFor();
+  assert(
+    (
+      await page
+        .getByRole("dialog", { name: "活动详情", exact: true })
+        .innerText()
+    ).includes("20 秒"),
+    "F05 桌面详情抽屉显示 20 秒中断",
+  );
+  await page.keyboard.press("Escape");
+  await page
+    .getByRole("heading", { name: "事件时间线", exact: true })
+    .waitFor();
+  await page.goto(
+    "http://127.0.0.1:5173/minutes/" + state.minute + "?date=2026-10-18",
+  );
+  await page.locator(".evidence-slot").first().waitFor();
+  assert(
+    (await page.locator(".evidence-slot").count()) === 60,
+    "F06 分钟详情有 60 个服务端秒槽",
+  );
+  await page.locator(".evidence-slot").nth(evidenceIndex).click();
+  await page
+    .getByRole("dialog", { name: "现场原图", exact: true })
+    .locator("img")
+    .waitFor();
+  await page.keyboard.press("ArrowRight");
+  await page
+    .getByRole("dialog", { name: "现场原图", exact: true })
+    .getByText(`${evidenceIndex + 2} / 60`, { exact: false })
+    .waitFor();
+  await page.keyboard.press("Escape");
+  assert(
+    await page
+      .locator(".evidence-slot")
+      .nth(evidenceIndex)
+      .evaluate((el) => el === document.activeElement),
+    "F13 证据 Esc 关闭后恢复触发点焦点",
+  );
+  await page.route("**/api/evidence/" + state.evidence, async (route) => {
+    await page.request.post("http://127.0.0.1:5173/api/_test/control", {
+      headers: { "X-CSRF-Token": session.data.csrf_token },
+      data: { expire_evidence: state.evidence },
+    });
+    await route.continue();
+  });
+  await page.locator(".evidence-slot").nth(evidenceIndex).click();
+  await page
+    .getByRole("dialog", { name: "现场原图", exact: true })
+    .getByText(/原图已过期/)
+    .first()
+    .waitFor();
+  assert(
+    (await page
+      .getByRole("dialog", { name: "现场原图", exact: true })
+      .locator("img")
+      .count()) === 0,
+    "F06 实际 200→410 后立即移除图片",
+  );
+  await page.unroute("**/api/evidence/" + state.evidence);
+  await page.keyboard.press("Escape");
+  assert(
+    await page.locator(".observation").first().isVisible(),
+    "F06 410 后文字记录继续可读",
+  );
+  assert(errors.length === 0, "F13 路由与交互无未捕获浏览器异常");
+  return {
+    checks,
+    errors,
+    state: { camera: state.camera, minute: state.minute },
+    beijingDate: "2026-10-18",
+  };
+};

@@ -1,8 +1,8 @@
 // 自动生成：python scripts/build_contracts.py；请勿手工编辑。
 export type ActivityDuration = { "activity": "reading" | "writing" | "computer" | "phone" | "away" | "resting" | "other" | "unknown"; "duration_ms": number; };
-export type AnalysisCreate = { "mode": "visual" | "records_only"; "camera_ids": Array<string>; "from": string; "to": string; "reference_policy"?: "current"; "allow_partial"?: boolean; "preview_token": string; };
+export type AnalysisCreate = { "mode": "visual" | "records_only"; "camera_ids": Array<string>; "from": string; "to": string; "reference_policy"?: "current"; "allow_partial"?: boolean; "subject_id"?: (string | null); "preview_token": string; };
 export type AnalysisPreviewDto = { "preview_token": string; "expires_at": string; "available_ranges": Array<AvailableRange>; "missing_ranges": Array<AvailableRange>; "available_frame_count": number; "earliest_expires_at": (string | null); "reference_set_id": string; "estimated_batches": number; "warnings": Array<WarningDto>; };
-export type AnalysisRequest = { "mode": "visual" | "records_only"; "camera_ids": Array<string>; "from": string; "to": string; "reference_policy"?: "current"; "allow_partial"?: boolean; };
+export type AnalysisRequest = { "mode": "visual" | "records_only"; "camera_ids": Array<string>; "from": string; "to": string; "reference_policy"?: "current"; "allow_partial"?: boolean; "subject_id"?: (string | null); };
 export type AvailableRange = { "from": string; "to": string; };
 export type Body_replaceReference = { "file": string; "crop"?: (string | null); [key: string]: unknown; };
 export type Body_uploadReference = { "file": string; "name"?: (string | null); "crop"?: (string | null); "enabled"?: boolean; [key: string]: unknown; };
@@ -118,7 +118,7 @@ export interface Operations {
   getSnapshot: { method: "GET"; path: "/api/cameras/{camera_id}/snapshot"; body: void; response: Blob; parameters: { path: { "camera_id": string; }; } };
   getOverview: { method: "GET"; path: "/api/overview"; body: void; response: Envelope_OverviewDto_; parameters: { query: { "from": string; "to": string; "camera_ids"?: (Array<string> | null); "subject_id"?: (string | null); }; } };
   getTimeline: { method: "GET"; path: "/api/timeline"; body: void; response: Envelope_TimelineDto_; parameters: { query: { "from": string; "to": string; "camera_ids"?: (Array<string> | null); "subject_id"?: (string | null); "bucket_seconds"?: 60 | 300 | 900; }; } };
-  listEvents: { method: "GET"; path: "/api/events"; body: void; response: ListEnvelope_EventDto_; parameters: { query: { "from": string; "to": string; "camera_ids"?: (Array<string> | null); "subject_id"?: (string | null); "activity"?: (string | null); "limit"?: number; "cursor"?: (string | null); }; } };
+  listEvents: { method: "GET"; path: "/api/events"; body: void; response: ListEnvelope_EventDto_; parameters: { query: { "from": string; "to": string; "camera_ids"?: (Array<string> | null); "subject_id"?: (string | null); "activity"?: (string | null); "identity_status"?: ("matched" | "possible" | "unknown" | null); "limit"?: number; "cursor"?: (string | null); }; } };
   getEvent: { method: "GET"; path: "/api/events/{event_id}"; body: void; response: Envelope_EventDto_; parameters: { path: { "event_id": string; }; query: { "revision"?: (number | null); }; } };
   updateEvent: { method: "PATCH"; path: "/api/events/{event_id}"; body: EventCorrection; response: Envelope_EventUpdateDto_; parameters: { header: { "X-CSRF-Token": string; "Idempotency-Key": string; "If-Match": string; }; path: { "event_id": string; }; } };
   listMinutes: { method: "GET"; path: "/api/minutes"; body: void; response: ListEnvelope_MinuteDto_; parameters: { query: { "from": string; "to": string; "camera_id"?: (string | null); "analysis_state"?: (string | null); "limit"?: number; "cursor"?: (string | null); }; } };

@@ -11,3 +11,11 @@ data/
 *.sqlite3*
 *.key
 backend/.test-output/
+node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/.test-output/
+frontend/.playwright/
+.playwright-cli/
+output/playwright/
+*.tsbuildinfo

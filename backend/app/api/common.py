@@ -60,7 +60,7 @@ def range_ms(from_, to, max_hours=31 * 24):
     return a, b
 
 
-def page_rows(w, conn, statement, time_col, id_col, *, filters, limit, cursor):
+def page_rows(w, conn, statement, time_col, id_col, *, filters, limit, cursor, descending=False):
     binding = fingerprint(filters)
     if cursor:
         try:
@@ -70,8 +70,13 @@ def page_rows(w, conn, statement, time_col, id_col, *, filters, limit, cursor):
             last_time, last_id = token["last"]
         except (AppError, ValueError, KeyError, TypeError):
             raise AppError(400, "INVALID_CURSOR", "游标无效、过期或与筛选不匹配") from None
-        statement = statement.where(or_(time_col > last_time, and_(time_col == last_time, id_col > last_id)))
-    rows = list(conn.execute(statement.order_by(time_col, id_col).limit(limit + 1)).mappings())
+        statement = statement.where(
+            or_(time_col < last_time, and_(time_col == last_time, id_col < last_id))
+            if descending
+            else or_(time_col > last_time, and_(time_col == last_time, id_col > last_id))
+        )
+    ordering = (time_col.desc(), id_col.desc()) if descending else (time_col, id_col)
+    rows = list(conn.execute(statement.order_by(*ordering).limit(limit + 1)).mappings())
     more = len(rows) > limit
     rows = rows[:limit]
     next_cursor = None

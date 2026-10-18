@@ -3662,6 +3662,27 @@
             }
           },
           {
+            "name": "identity_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "matched",
+                    "possible",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Identity Status"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -10710,6 +10731,17 @@
             "title": "Allow Partial",
             "default": false
           },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Id"
+          },
           "preview_token": {
             "type": "string",
             "title": "Preview Token"
@@ -10837,6 +10869,17 @@
             "type": "boolean",
             "title": "Allow Partial",
             "default": false
+          },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Id"
           }
         },
         "additionalProperties": false,

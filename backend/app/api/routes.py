@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi.responses import Response
+from pydantic import BeforeValidator
 from sqlalchemy import and_, func, select
 
 from app.api.common import mutation, page_rows, range_ms, respond
@@ -410,7 +411,11 @@ def event_rows(w, conn, a, b, scope, activity, limit=100):
     if scope["subject_id"]:
         stmt = stmt.where(s.event_revisions.c.summary_json["subject_id"].as_string() == scope["subject_id"])
     result = []
-    for row in conn.execute(stmt.order_by(s.events.c.created_at_ms.desc(), s.events.c.id).limit(limit * 10)):
+    for row in conn.execute(
+        stmt.order_by(s.event_revisions.c.summary_json["start_at"].as_string().desc(), s.events.c.id).limit(
+            limit * 10
+        )
+    ):
         event = w.ledger.event(conn, row.id)
         if set(scope["camera_ids"]) & set(event["camera_ids"]):
             result.append(event)
@@ -426,10 +431,17 @@ def timeline(
     to: str = Query(),
     camera_ids: list[str] | None = Query(None),
     subject_id: str | None = None,
-    bucket_seconds: Literal[60, 300, 900] = 60,
+    bucket_seconds: Annotated[Literal[60, 300, 900], BeforeValidator(int)] = 60,
 ):
     w = request.app.state.workbench
     a, b = range_ms(from_, to, 24)
+    if (
+        datetime.fromtimestamp(a / 1000, BEIJING).date()
+        == datetime.fromtimestamp(w.now() / 1000, BEIJING).date()
+    ):
+        b = min(b, w.now())
+    if b <= a:
+        raise AppError(400, "INVALID_TIME_RANGE", "此范围尚未发生")
     buckets = []
     with w.db.read() as conn:
         scope = w.ledger.scope(conn, camera_ids, subject_id, a, b)
@@ -468,6 +480,7 @@ def events(
     camera_ids: list[str] | None = Query(None),
     subject_id: str | None = None,
     activity: str | None = None,
+    identity_status: Literal["matched", "possible", "unknown"] | None = None,
     limit: Limit = 50,
     cursor: str | None = None,
 ):
@@ -475,8 +488,9 @@ def events(
     a, b = range_ms(from_, to)
     with w.db.read() as conn:
         scope = w.ledger.scope(conn, camera_ids, subject_id, a, b)
+        event_started_at = s.event_revisions.c.summary_json["start_at"].as_string().label("event_started_at")
         stmt = (
-            select(s.events)
+            select(s.events, event_started_at)
             .join(
                 s.event_revisions,
                 and_(
@@ -494,6 +508,10 @@ def events(
             stmt = stmt.where(s.event_revisions.c.summary_json["subject_id"].as_string() == subject_id)
         if activity:
             stmt = stmt.where(s.event_revisions.c.summary_json["activity"].as_string() == activity)
+        if identity_status:
+            stmt = stmt.where(
+                s.event_revisions.c.summary_json["identity_status"].as_string() == identity_status
+            )
         # JSON 数组包含筛选由 SQLite json_each 执行，分页前应用。
         from sqlalchemy import exists
 
@@ -505,11 +523,19 @@ def events(
             w,
             conn,
             stmt,
-            s.events.c.created_at_ms,
+            event_started_at,
             s.events.c.id,
-            filters={"op": "listEvents", "from": a, "to": b, "scope": scope, "activity": activity},
+            filters={
+                "op": "listEvents",
+                "from": a,
+                "to": b,
+                "scope": scope,
+                "activity": activity,
+                "identity_status": identity_status,
+            },
             limit=limit,
             cursor=cursor,
+            descending=True,
         )
         data = []
         for row in rows:
