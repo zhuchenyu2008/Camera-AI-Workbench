@@ -6,7 +6,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { api } from "../../api/client";
+import { api, ApiError } from "../../api/client";
 import { useApi } from "../../api/query";
 import { useAction } from "../hooks";
 import {
@@ -20,6 +20,7 @@ import {
 import { dateTime } from "../time";
 import { evidenceLabels } from "../labels";
 import { useEphemeralImage } from "./EphemeralImage";
+import type { Crop } from "../../api/generated/types";
 
 export function EvidenceViewer({
   ids,
@@ -36,7 +37,15 @@ export function EvidenceViewer({
     [promote, setPromote] = useState(false),
     [entity, setEntity] = useState(""),
     [name, setName] = useState(""),
-    [keep, setKeep] = useState(false);
+    [keep, setKeep] = useState(false),
+    [crop, setCrop] = useState<Crop>({ x: 0, y: 0, width: 1, height: 1 });
+  const cropValid =
+    crop.x >= 0 &&
+    crop.y >= 0 &&
+    crop.width > 0 &&
+    crop.height > 0 &&
+    crop.x + crop.width <= 1 &&
+    crop.y + crop.height <= 1;
   const id = ids[index];
   const query = useApi(
       "getEvidenceMetadata",
@@ -62,6 +71,7 @@ export function EvidenceViewer({
       onIndex(next);
       setZoom(1);
       setPromote(false);
+      setCrop({ x: 0, y: 0, width: 1, height: 1 });
     }
   };
   useEffect(() => {
@@ -136,7 +146,10 @@ export function EvidenceViewer({
                       {e.state !== "available"
                         ? evidenceLabels[e.state]
                         : image.error
-                          ? "原图已不可用"
+                          ? image.error instanceof ApiError &&
+                            image.error.status === 410
+                            ? "原图已过期；文字记录仍可查看"
+                            : "原图已不可用"
                           : "正在读取图片"}
                     </p>
                     <small>文字记录和来源元数据仍可查看</small>
@@ -204,9 +217,9 @@ export function EvidenceViewer({
                     const target = entities.data?.data.find(
                       (e) => e.id === entity,
                     );
-                    if (!target) return;
+                    if (!target || !cropValid) return;
                     void action.run(
-                      [id, entity, name, keep, target.revision],
+                      [id, entity, name, keep, crop, target.revision],
                       async (key) => {
                         await api("promoteReference", {
                           path: { entity_id: entity },
@@ -216,6 +229,7 @@ export function EvidenceViewer({
                             evidence_id: id,
                             keep_as_reference: true,
                             name,
+                            crop,
                             enabled: false,
                           },
                         });
@@ -255,15 +269,50 @@ export function EvidenceViewer({
                     />
                     我确认单独长期保存此图，不受现场图保存期限影响
                   </label>
+                  <div className="form-grid">
+                    {(["x", "y", "width", "height"] as const).map((key) => (
+                      <Field
+                        label={
+                          {
+                            x: "参考裁剪左边界",
+                            y: "参考裁剪上边界",
+                            width: "参考裁剪宽度",
+                            height: "参考裁剪高度",
+                          }[key]
+                        }
+                        key={key}
+                      >
+                        <input
+                          type="number"
+                          min={key === "x" || key === "y" ? 0 : 0.001}
+                          max="1"
+                          step="0.001"
+                          required
+                          value={crop[key]}
+                          onChange={(event) =>
+                            setCrop({
+                              ...crop,
+                              [key]: Number(event.target.value),
+                            })
+                          }
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                  {!cropValid && (
+                    <Notice tone="danger">
+                      裁剪范围须位于图片内，且宽高大于 0。
+                    </Notice>
+                  )}
                   <Notice>
-                    保存为未启用参考图，可在档案页裁剪、检查后启用；不会延长原现场图到期时间。
+                    按当前裁剪范围另存为未启用参考图；检查后可在档案页启用。不会延长原现场图到期时间。
                   </Notice>
                   <ErrorNotice error={action.error} />
                   <Button
                     type="submit"
                     variant="primary"
                     busy={action.pending}
-                    disabled={!image.url || !keep}
+                    disabled={!image.url || !keep || !cropValid}
                   >
                     确认长期保存
                   </Button>

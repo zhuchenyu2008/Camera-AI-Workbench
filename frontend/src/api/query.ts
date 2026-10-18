@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { hashKey, QueryClient, useQuery } from "@tanstack/react-query";
 import { api, ApiError, type Args, type Op } from "./client";
 import type { Operations } from "./generated/types";
+import { serverNow } from "../shared/time";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -13,7 +14,7 @@ export const queryClient = new QueryClient({
         count < 2 && (!(e instanceof ApiError) || e.status >= 500),
       retryDelay: (n, e) =>
         e instanceof ApiError && e.retryAt
-          ? Math.max(0, e.retryAt - Date.now())
+          ? Math.max(0, e.retryAt - serverNow())
           : Math.min(1000 * 2 ** n, 8000),
     },
     mutations: { retry: false, gcTime: 0 },

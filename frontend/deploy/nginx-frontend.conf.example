@@ -1,0 +1,18 @@
+# 放入既有 HTTPS server 块，与 backend/deploy/nginx-locations.conf.example 合并。
+# /api/ 继续使用现有鉴权反向代理配置；以下不改变后端网络白名单。
+root /srv/camera-ai-workbench/frontend/dist;
+index index.html;
+
+location /assets/ {
+    try_files $uri =404;
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+}
+
+location / {
+    try_files $uri $uri/ /index.html;
+    add_header Cache-Control "no-cache";
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy same-origin always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+}

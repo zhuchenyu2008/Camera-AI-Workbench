@@ -122,10 +122,11 @@ function SessionBridge() {
       window.dispatchEvent(new Event("media-invalidated"));
       void queryClient.cancelQueries();
       setCsrf("");
-      navigate(
-        `/login?return_to=${encodeURIComponent(location.pathname + location.search)}`,
-        { replace: true },
-      );
+      if (location.pathname !== "/login")
+        navigate(
+          `/login?return_to=${encodeURIComponent(location.pathname + location.search)}`,
+          { replace: true },
+        );
       queryClient.clear();
     };
     const refresh = () => {

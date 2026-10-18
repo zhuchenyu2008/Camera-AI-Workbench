@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, renderHook, screen, act, cleanup } from "@testing-library/react";
+import {
+  render,
+  renderHook,
+  screen,
+  act,
+  cleanup,
+} from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { api, ApiError, apiUrl, safeReturnTo, setCsrf } from "../api/client";
 import {
@@ -17,11 +23,11 @@ import {
   syncServerTime,
 } from "../shared/time";
 import { containedRect, normalizePoint, polygonError } from "../shared/roi";
-import { sourceHref } from "../shared/components";
+import { sourceHref, Field, ErrorNotice } from "../shared/components";
 import { tokenText, costText } from "../features/operations/Operations";
 import { useEphemeralImage } from "../shared/media/EphemeralImage";
-import { useAction } from '../shared/hooks';
-import { mergedWeek, defaultOverrideEnd } from '../shared/schedule';
+import { useAction } from "../shared/hooks";
+import { mergedWeek, defaultOverrideEnd } from "../shared/schedule";
 import fixture from "./fixtures/contracts.json";
 
 beforeEach(() => {
@@ -64,6 +70,40 @@ describe("北京时间和服务端时长", () => {
   });
 });
 describe("坐标和可追溯引用", () => {
+  it("选择框标签不会混入全部选项，字段错误关联并聚焦输入", () => {
+    render(
+      <form>
+        <Field label="主要活动">
+          <select>
+            <option>阅读</option>
+            <option>书写</option>
+          </select>
+        </Field>
+        <Field label="端口">
+          <input name="source.port" />
+        </Field>
+        <ErrorNotice
+          error={
+            new ApiError(422, "VALIDATION_ERROR", "字段错误", "req_test", [
+              {
+                path: "source.port",
+                code: "range",
+                message: "端口不在允许范围",
+              },
+            ])
+          }
+        />
+      </form>,
+    );
+    expect(
+      screen.getByLabelText("主要活动", { exact: true }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("端口")).toHaveFocus();
+    expect(screen.getByLabelText("端口")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+  });
   it("contain 留白不能生成 ROI 顶点", () => {
     const rect = containedRect(
       { width: 400, height: 400 },
@@ -196,17 +236,43 @@ describe("契约、错误与幂等", () => {
   });
 });
 describe("生命周期", () => {
-  it('同一写入意图响应丢失后复用幂等键，双击不重复提交',async()=>{
-    const hook=renderHook(()=>useAction<unknown>()),keys:string[]=[];
-    await act(async()=>{await hook.result.current.run({body:1},async key=>{keys.push(key);throw new TypeError('network');});});
-    await act(async()=>{await hook.result.current.run({body:1},async key=>{keys.push(key);return true;});});
+  it("同一写入意图响应丢失后复用幂等键，双击不重复提交", async () => {
+    const hook = renderHook(() => useAction<unknown>()),
+      keys: string[] = [];
+    await act(async () => {
+      await hook.result.current.run({ body: 1 }, async (key) => {
+        keys.push(key);
+        throw new TypeError("network");
+      });
+    });
+    await act(async () => {
+      await hook.result.current.run({ body: 1 }, async (key) => {
+        keys.push(key);
+        return true;
+      });
+    });
     expect(keys[0]).toBe(keys[1]);
-    let finish:(v:boolean)=>void=()=>{};
-    const pending=new Promise<boolean>(r=>{finish=r;});
-    let first:Promise<unknown>;
-    act(()=>{first=hook.result.current.run({body:2},async key=>{keys.push(key);return pending;});void hook.result.current.run({body:2},async key=>{keys.push(key);return true;});});
-    expect(keys.length).toBe(3);expect(keys[2]).not.toBe(keys[1]);
-    await act(async()=>{finish(true);await first;});
+    let finish: (v: boolean) => void = () => {};
+    const pending = new Promise<boolean>((r) => {
+      finish = r;
+    });
+    let first: Promise<unknown>;
+    act(() => {
+      first = hook.result.current.run({ body: 2 }, async (key) => {
+        keys.push(key);
+        return pending;
+      });
+      void hook.result.current.run({ body: 2 }, async (key) => {
+        keys.push(key);
+        return true;
+      });
+    });
+    expect(keys.length).toBe(3);
+    expect(keys[2]).not.toBe(keys[1]);
+    await act(async () => {
+      finish(true);
+      await first;
+    });
   });
   it("同一 key 只有一个轮询，隐藏与卸载清理", async () => {
     vi.useFakeTimers();
@@ -302,7 +368,26 @@ describe("生命周期", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
-describe('北京时间周计划',()=>{
-  it('合并重叠计划并正确拆分周日跨周一',()=>{expect(mergedWeek([{weekdays:[7],start:'23:00',end:'01:00',end_day_offset:1},{weekdays:[1],start:'00:30',end:'02:00'}])).toEqual([[0,120],[10020,10080]]);});
-  it('临时控制默认结束于下一计划边界，无计划时一小时',()=>{const now=Date.parse('2026-10-18T11:20:00+08:00');expect(defaultOverrideEnd([{weekdays:[7],start:'08:00',end:'12:00'}],now)).toBe(Date.parse('2026-10-18T12:00:00+08:00'));expect(defaultOverrideEnd([],now)).toBe(now+3600000);});
+describe("北京时间周计划", () => {
+  it("合并重叠计划并正确拆分周日跨周一", () => {
+    expect(
+      mergedWeek([
+        { weekdays: [7], start: "23:00", end: "01:00", end_day_offset: 1 },
+        { weekdays: [1], start: "00:30", end: "02:00" },
+      ]),
+    ).toEqual([
+      [0, 120],
+      [10020, 10080],
+    ]);
+  });
+  it("临时控制默认结束于下一计划边界，无计划时一小时", () => {
+    const now = Date.parse("2026-10-18T11:20:00+08:00");
+    expect(
+      defaultOverrideEnd(
+        [{ weekdays: [7], start: "08:00", end: "12:00" }],
+        now,
+      ),
+    ).toBe(Date.parse("2026-10-18T12:00:00+08:00"));
+    expect(defaultOverrideEnd([], now)).toBe(now + 3600000);
+  });
 });

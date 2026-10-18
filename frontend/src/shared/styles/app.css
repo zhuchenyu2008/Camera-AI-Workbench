@@ -505,6 +505,22 @@
   }
 }
 @layer components {
+  .field > label {
+    display: block;
+    margin-bottom: 7px;
+  }
+  .field > input,
+  .field > select,
+  .field > textarea {
+    width: 100%;
+  }
+  .scope-field > span {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .scope-field select {
+    min-height: 44px;
+  }
   .button {
     min-height: 44px;
     padding: 10px 14px;
@@ -2377,6 +2393,27 @@
     max-height: calc(100svh - 48px);
     margin: auto;
     border-radius: 10px;
+  }
+}
+@layer components {
+  .protected-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+}
+@layer responsive {
+  .scope-field select {
+    min-height: 44px;
+  }
+  .segmented .button {
+    min-height: 44px;
+  }
+  @media (max-width: 767px) {
+    .event-main strong,
+    .activity-row .row-between {
+      font-size: 16px;
+    }
   }
 }
 @keyframes route-in {

@@ -15,9 +15,13 @@ import {
   ScopePicker,
   useScope,
 } from "../../shared/components";
-import { jobLabels } from "../../shared/labels";
+import { jobLabels, kindLabels, captureLabel } from "../../shared/labels";
 import { bytes, clock, dateTime, duration } from "../../shared/time";
-import type { TokenTotal, UsageTotal } from "../../api/generated/types";
+import type {
+  TokenTotal,
+  UsageTotal,
+  CameraRuntime,
+} from "../../api/generated/types";
 const num = (n: unknown) =>
   typeof n === "number" ? n.toLocaleString("zh-CN") : "未知";
 export function tokenText(token: TokenTotal) {
@@ -92,7 +96,7 @@ export function Status() {
                             ? "视频流断开，期间无可用图片"
                             : c.capture_state === "resource_paused"
                               ? "磁盘保护暂停采集"
-                              : `采集：${String(c.capture_state ?? "等待状态")}`}
+                              : captureLabel(c as CameraRuntime)}
                         </p>
                       </div>
                       <ScopeLink
@@ -320,7 +324,9 @@ export function Status() {
                         >
                           {jobLabels[j.job_state]}
                         </Badge>
-                        <strong className="caption">{j.kind}</strong>
+                        <strong className="caption">
+                          {kindLabels[j.kind] ?? "后台任务"}
+                        </strong>
                       </div>
                       <p className="caption muted">
                         {clock(j.created_at, true)} · {j.phase} ·{" "}
@@ -375,6 +381,7 @@ export function Usage() {
         <label className="inline-field">
           分组
           <select
+            aria-label="分组"
             value={group}
             onChange={(e) => scope.update("group_by", e.target.value)}
           >
@@ -387,6 +394,7 @@ export function Usage() {
         <label className="inline-field">
           服务
           <select
+            aria-label="服务"
             value={scope.search.get("provider_id") ?? ""}
             onChange={(e) => scope.update("provider_id", e.target.value)}
           >

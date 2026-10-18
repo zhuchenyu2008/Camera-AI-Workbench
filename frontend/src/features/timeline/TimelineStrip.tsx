@@ -21,7 +21,11 @@ export function TimelineStrip({
     <div className="timeline-strip">
       <div className="timeline-ticks">
         {Array.from({ length: 7 }, (_, i) => (
-          <span key={i}>{clock(start + (span * i) / 6)}</span>
+          <span key={i}>
+            {i === 6 && span === 86400000
+              ? "24:00"
+              : clock(start + (span * i) / 6)}
+          </span>
         ))}
       </div>
       <div

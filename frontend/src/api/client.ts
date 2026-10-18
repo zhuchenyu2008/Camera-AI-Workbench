@@ -1,6 +1,6 @@
 import { operations } from "./generated/operations";
 import type { Operations, ErrorEnvelope } from "./generated/types";
-import { clock, syncServerTime } from "../shared/time";
+import { clock, syncServerTime, serverNow } from "../shared/time";
 
 export type Op = keyof Operations;
 type QueryArgs<K extends Op> = Operations[K]["parameters"] extends {
@@ -85,11 +85,14 @@ export function apiUrl<K extends Op>(op: K, args: Args<K> = {} as Args<K>) {
   return path + (search.size ? `?${search}` : "");
 }
 export async function checkedFetch(url: string, init: RequestInit = {}) {
-  const response = await fetch(sameOriginMedia(url), {
-    ...init,
-    credentials: "same-origin",
-    cache: "no-store",
-  });
+  const response = await fetch(
+    url === "/health/live" ? url : sameOriginMedia(url),
+    {
+      ...init,
+      credentials: "same-origin",
+      cache: "no-store",
+    },
+  );
   if (!response.ok) {
     let body: Partial<ErrorEnvelope> = {};
     try {
@@ -97,10 +100,11 @@ export async function checkedFetch(url: string, init: RequestInit = {}) {
     } catch {
       /* Media proxies may return a plain error. */
     }
+    if (body.meta?.server_time) syncServerTime(body.meta.server_time);
     const after = response.headers.get("Retry-After");
     const retryAt = after
       ? /^\d+$/.test(after)
-        ? Date.now() + Number(after) * 1000
+        ? serverNow() + Number(after) * 1000
         : Date.parse(after)
       : null;
     const err = new ApiError(

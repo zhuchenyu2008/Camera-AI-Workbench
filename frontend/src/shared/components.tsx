@@ -164,31 +164,76 @@ export function ErrorNotice({
   error: unknown;
   retry?: () => void;
 }) {
+  const errorId = useId(),
+    root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!(error instanceof ApiError) || !error.fields?.length) return;
+    const scope =
+      root.current?.closest("form") ??
+      root.current?.closest("dialog") ??
+      root.current?.closest("main");
+    const changed: {
+      element: HTMLElement;
+      before: string | null;
+      invalid: string | null;
+    }[] = [];
+    error.fields.forEach((field, index) => {
+      const path = field.path.replace(/^patch\./, "");
+      const element = Array.from(
+        scope?.querySelectorAll<HTMLElement>("[name]") ?? [],
+      ).find((input) => input.getAttribute("name") === path);
+      if (element) {
+        changed.push({
+          element,
+          before: element.getAttribute("aria-describedby"),
+          invalid: element.getAttribute("aria-invalid"),
+        });
+        element.setAttribute("aria-invalid", "true");
+        element.setAttribute(
+          "aria-describedby",
+          `${element.getAttribute("aria-describedby") ?? ""} ${errorId}-${index}`.trim(),
+        );
+      }
+    });
+    changed[0]?.element.focus();
+    return () => {
+      for (const { element, before, invalid } of changed) {
+        before
+          ? element.setAttribute("aria-describedby", before)
+          : element.removeAttribute("aria-describedby");
+        invalid
+          ? element.setAttribute("aria-invalid", invalid)
+          : element.removeAttribute("aria-invalid");
+      }
+    };
+  }, [error, errorId]);
   if (!error) return null;
   return (
-    <Notice tone="danger">
-      <p>{errorText(error)}</p>
-      {error instanceof ApiError && (
-        <>
-          {error.fields?.map((f) => (
-            <p key={f.path} className="caption">
-              {f.path}：{f.message}
-            </p>
-          ))}
-          {error.requestId && (
-            <button
-              type="button"
-              className="text-button mono"
-              onClick={() => navigator.clipboard?.writeText(error.requestId)}
-              aria-label="复制请求 ID"
-            >
-              请求 ID：{error.requestId}
-            </button>
-          )}
-        </>
-      )}
-      {retry && <Button onClick={retry}>重新读取</Button>}
-    </Notice>
+    <div ref={root}>
+      <Notice tone="danger">
+        <p>{errorText(error)}</p>
+        {error instanceof ApiError && (
+          <>
+            {error.fields?.map((f, index) => (
+              <p key={f.path} id={`${errorId}-${index}`} className="caption">
+                {f.path}：{f.message}
+              </p>
+            ))}
+            {error.requestId && (
+              <button
+                type="button"
+                className="text-button mono"
+                onClick={() => navigator.clipboard?.writeText(error.requestId)}
+                aria-label="复制请求 ID"
+              >
+                请求 ID：{error.requestId}
+              </button>
+            )}
+          </>
+        )}
+        {retry && <Button onClick={retry}>重新读取</Button>}
+      </Notice>
+    </div>
   );
 }
 export function EmptyState({
@@ -268,25 +313,33 @@ export function Field({
   const id = useId();
   return (
     <div className="field">
-      <label>
+      <label
+        htmlFor={
+          isValidElement<{ id?: string }>(children)
+            ? (children.props.id ?? id)
+            : id
+        }
+      >
         {label}
-        {isValidElement<{
-          "aria-describedby"?: string;
-          "aria-invalid"?: boolean;
-        }>(children)
-          ? cloneElement(children, {
-              "aria-describedby":
-                [
-                  hint ? `${id}-hint` : "",
-                  error ? `${id}-error` : "",
-                  children.props["aria-describedby"],
-                ]
-                  .filter(Boolean)
-                  .join(" ") || undefined,
-              "aria-invalid": error ? true : undefined,
-            })
-          : children}
       </label>
+      {isValidElement<{
+        id?: string;
+        "aria-describedby"?: string;
+        "aria-invalid"?: boolean;
+      }>(children)
+        ? cloneElement(children, {
+            id: children.props.id ?? id,
+            "aria-describedby":
+              [
+                hint ? `${id}-hint` : "",
+                error ? `${id}-error` : "",
+                children.props["aria-describedby"],
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined,
+            "aria-invalid": error ? true : undefined,
+          })
+        : children}
       {hint && <small id={`${id}-hint`}>{hint}</small>}
       {error && (
         <small role="alert" className="field-error" id={`${id}-error`}>

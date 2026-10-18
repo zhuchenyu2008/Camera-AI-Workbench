@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { checkedFetch, ApiError } from "../../api/client";
 import { serverNow } from "../time";
 import { useVisible } from "../hooks";
@@ -114,18 +114,32 @@ export function ProtectedImage({
   className?: string;
   onLoad?: (image: HTMLImageElement) => void;
 }) {
-  const image = useEphemeralImage(url);
-  return image.url ? (
-    <img
-      className={className}
-      src={image.url}
-      alt={alt}
-      loading="lazy"
-      onLoad={(e) => onLoad?.(e.currentTarget)}
-    />
-  ) : (
-    <span className="image-placeholder">
-      {image.error ? "图片不可用" : "正在读取图片"}
+  const target = useRef<HTMLSpanElement>(null),
+    [near, setNear] = useState(false);
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => setNear(entries.some((e) => e.isIntersecting)),
+      { rootMargin: "200px" },
+    );
+    observer.observe(target.current!);
+    return () => observer.disconnect();
+  }, []);
+  const image = useEphemeralImage(url, { enabled: near });
+  return (
+    <span ref={target} className="protected-image">
+      {image.url ? (
+        <img
+          className={className}
+          src={image.url}
+          alt={alt}
+          loading="lazy"
+          onLoad={(e) => onLoad?.(e.currentTarget)}
+        />
+      ) : (
+        <span className="image-placeholder">
+          {image.error ? "图片不可用" : "正在读取图片"}
+        </span>
+      )}
     </span>
   );
 }

@@ -67,7 +67,14 @@ function EntityForm({ entity }: { entity: EntityDto }) {
   const blocker = useUnsaved(dirty);
   // Reference mutations increment the entity revision; update baseline only with no unsaved edits.
   useEffect(() => {
-    if (!dirty) setBase(entity);
+    if (!dirty) {
+      setBase(entity);
+      setName(entity.name);
+      setDescription(entity.description);
+      setCameraIds(entity.camera_ids);
+      setEnabled(entity.enabled);
+      setPrimary(entity.is_primary_subject);
+    }
   }, [entity.revision]);
   const refresh = () =>
     invalidate(
@@ -595,7 +602,7 @@ function UploadReference({
             <div
               className="reference-photo"
               style={{
-                height: 200,
+                aspectRatio: `${dimensions.width}/${dimensions.height}`,
                 overflow: "hidden",
                 position: "relative",
                 background: "#f0f3ed",
@@ -604,7 +611,7 @@ function UploadReference({
               <img
                 src={preview}
                 alt="上传图与裁剪范围预览"
-                style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                style={{ width: "100%", height: "100%" }}
               />
               <span
                 style={{

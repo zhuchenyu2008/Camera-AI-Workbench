@@ -1,4 +1,5 @@
 import type { CameraRuntime, EventDto } from "../api/generated/types";
+import { clock } from "./time";
 export const activities: Record<EventDto["activity"], string> = {
   reading: "阅读",
   writing: "书写",
@@ -41,6 +42,21 @@ export const jobLabels: Record<string, string> = {
   expired: "已过期",
   cancelled: "已取消",
 };
+export const kindLabels: Record<string, string> = {
+  camera_test: "机位连接测试",
+  provider_test: "模型能力测试",
+  sparse_analysis: "稀疏分析",
+  dense_analysis: "逐秒分析",
+  dense_backfill: "逐秒补充分析",
+  manual_visual: "原图重新分析",
+  reconcile_minutes: "更新分钟记录",
+  summarize_hour: "小时汇总",
+  summarize_day: "日报汇总",
+  manual_records: "按现有记录汇总",
+  project_events: "更新事件视图",
+  cleanup_assets: "清理到期图片",
+  apply_settings: "应用设置",
+};
 export const phaseLabels: Record<string, string> = {
   waiting: "等待执行",
   preflight: "检查资料",
@@ -60,6 +76,11 @@ export const queueLabels: Record<string, string> = {
 export function captureLabel(runtime: CameraRuntime) {
   if ((runtime.control_revision ?? 0) > (runtime.applied_revision ?? 0))
     return "命令已提交，等待应用";
+  if (
+    runtime.capture_state === "stopped" &&
+    runtime.stop_reason === "manual_override"
+  )
+    return `已临时停止${runtime.override_expires_at ? `，至 ${clock(runtime.override_expires_at)}` : ""}`;
   if (runtime.capture_state === "stopped")
     return (
       (

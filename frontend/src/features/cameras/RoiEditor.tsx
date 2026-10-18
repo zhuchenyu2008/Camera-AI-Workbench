@@ -30,6 +30,8 @@ export function RoiEditor({
   const container = useRef<HTMLDivElement>(null),
     drag = useRef<{ id: string; point: number } | null>(null),
     rectangleStart = useRef<Point | null>(null);
+  const pointers = useRef(new Map<number, Point>()),
+    pinch = useRef<{ distance: number; zoom: number } | null>(null);
   const image = useEphemeralImage(imageUrl, { expiresAt });
   useEffect(() => {
     const observer = new ResizeObserver((entries) => {
@@ -161,8 +163,24 @@ export function RoiEditor({
           <svg
             role="application"
             aria-label="检测区域画布；下方可用数字坐标编辑顶点"
+            onPointerDownCapture={(event) => {
+              pointers.current.set(event.pointerId, [
+                event.clientX,
+                event.clientY,
+              ]);
+              if (pointers.current.size === 2) {
+                const [a, b] = [...pointers.current.values()];
+                pinch.current = {
+                  distance: Math.hypot(a[0] - b[0], a[1] - b[1]),
+                  zoom,
+                };
+                rectangleStart.current = null;
+                drag.current = null;
+                setPoints([]);
+              }
+            }}
             onPointerDown={(event) => {
-              if (!image.url || drag.current) return;
+              if (!image.url || drag.current || pinch.current) return;
               const point = coords(event);
               if (!point) return;
               event.currentTarget.setPointerCapture(event.pointerId);
@@ -172,6 +190,26 @@ export function RoiEditor({
               } else if (points.length < 32) setPoints((p) => [...p, point]);
             }}
             onPointerMove={(event) => {
+              if (pointers.current.has(event.pointerId))
+                pointers.current.set(event.pointerId, [
+                  event.clientX,
+                  event.clientY,
+                ]);
+              if (pinch.current && pointers.current.size === 2) {
+                const [a, b] = [...pointers.current.values()];
+                setZoom(
+                  Math.min(
+                    3,
+                    Math.max(
+                      1,
+                      (pinch.current.zoom *
+                        Math.hypot(a[0] - b[0], a[1] - b[1])) /
+                        Math.max(1, pinch.current.distance),
+                    ),
+                  ),
+                );
+                return;
+              }
               const point = coords(event);
               if (!point) return;
               if (drag.current) {
@@ -195,11 +233,22 @@ export function RoiEditor({
                 setPoints([a, [point[0], a[1]], point, [a[0], point[1]]]);
               }
             }}
-            onPointerUp={() => {
-              if (rectangleStart.current && points.length === 4) apply(points);
+            onPointerUp={(event) => {
+              pointers.current.delete(event.pointerId);
+              if (
+                !pinch.current &&
+                rectangleStart.current &&
+                points.length === 4
+              )
+                apply(points);
+              if (pointers.current.size < 2) pinch.current = null;
               finishDrag();
             }}
-            onPointerCancel={finishDrag}
+            onPointerCancel={(event) => {
+              pointers.current.delete(event.pointerId);
+              pinch.current = null;
+              finishDrag();
+            }}
           >
             <defs>
               <pattern
@@ -234,9 +283,12 @@ export function RoiEditor({
                     cx={rect.x + x * rect.width}
                     cy={rect.y + y * rect.height}
                     r={7}
+                    stroke="transparent"
+                    strokeWidth={30}
                     fill={p.kind === "exclude" ? "#edc88b" : "#9bd6b5"}
                     onPointerDown={(event) => {
                       event.stopPropagation();
+                      if (pinch.current) return;
                       drag.current = { id: p.id, point: i };
                       setSelected(p.id);
                       event.currentTarget.setPointerCapture(event.pointerId);

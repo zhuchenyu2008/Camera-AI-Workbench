@@ -79,7 +79,8 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
     [message, setMessage] = useState(""),
     [saved, setSaved] = useState(false),
     [roiOpen, setRoiOpen] = useState(false),
-    [latest, setLatest] = useState<CameraDto | null>(null);
+    [latest, setLatest] = useState<CameraDto | null>(null),
+    [deletedRequested, setDeletedRequested] = useState(false);
   const action = useAction<unknown>();
   const draft = {
     name,
@@ -107,6 +108,19 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
   };
   const dirty = JSON.stringify(draft) !== JSON.stringify(original) && !saved;
   const blocker = useUnsaved(dirty);
+  useEffect(() => {
+    if (camera && base && !dirty && camera.revision !== base.revision) {
+      setBase(camera);
+      setName(camera.name);
+      setPort(Number(camera.source.port));
+      setPath(String(camera.source.path));
+      setUsername(String(camera.source.username ?? ""));
+      setSchedule(camera.schedule);
+      setRegions(camera.regions);
+      setRetention(camera.retention_minutes?.toString() ?? "");
+      setEnabled(camera.enabled);
+    }
+  }, [camera?.revision]);
   useEffect(() => {
     setSaved(false);
   }, [JSON.stringify(draft)]);
@@ -749,7 +763,18 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
           </div>
         </Modal>
       )}
-      {job && <JobModal id={job} onClose={() => setJob(null)} />}{" "}
+      {job && (
+        <JobModal
+          id={job}
+          onClose={() => {
+            setJob(null);
+            if (deletedRequested) {
+              blocker.allowNavigation();
+              navigate("/cameras");
+            }
+          }}
+        />
+      )}{" "}
       {deleting && (
         <Confirm
           title={`删除「${base!.name}」？`}
@@ -773,6 +798,7 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
                   intent: key,
                 });
                 setSaved(true);
+                setDeletedRequested(true);
                 setDeleting(false);
                 setJob(r.data.id);
                 await invalidate("listCameras", "getStatus");
