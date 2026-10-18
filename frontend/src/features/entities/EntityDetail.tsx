@@ -269,6 +269,17 @@ function EntityForm({ entity }: { entity: EntityDto }) {
                 <dd>{entity.references.filter((r) => r.enabled).length} 张</dd>
               </div>
               <div>
+                <dt>视觉请求有效总图上限</dt>
+                <dd>
+                  {limit?.vision && typeof limit.vision === "object"
+                    ? String(
+                        (limit.vision as Record<string, unknown>)
+                          .max_total_images ?? "未知",
+                      )
+                    : "未配置"}
+                </dd>
+              </div>
+              <div>
                 <dt>适用范围</dt>
                 <dd>
                   {entity.camera_ids.length

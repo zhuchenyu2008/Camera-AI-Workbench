@@ -97,7 +97,10 @@ export function Timeline() {
       >
         <div className="row-between">
           <span className="caption">
-            {clock(range.from)}—{clock(range.to)} · 北京时间
+            {zoom === "24"
+              ? "00:00—24:00"
+              : `${clock(range.from)}—${clock(range.to)}`}{" "}
+            · 北京时间
           </span>
           {zoom === "4" && (
             <div className="actions">

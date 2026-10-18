@@ -462,8 +462,8 @@
     margin-bottom: 20px;
   }
   .panel-heading h2 {
-    font-size: 18px;
-    line-height: 26px;
+    font-size: 20px;
+    line-height: 28px;
   }
   .panel-heading .eyebrow {
     font-size: 12px;
@@ -2405,6 +2405,33 @@
 @layer responsive {
   .scope-field select {
     min-height: 44px;
+  }
+  @media (max-width: 767px) {
+    .panel-heading > :last-child:not(:first-child) {
+      max-width: 100%;
+      min-width: 0;
+      flex-shrink: 1;
+    }
+    .panel-heading > .actions {
+      width: 100%;
+    }
+    .panel-heading h2 {
+      line-height: 26px;
+    }
+    .scope-fields {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .scope-field {
+      width: 100%;
+      flex: none;
+    }
+    .scope-field input,
+    .scope-field select {
+      max-width: none;
+      width: auto;
+      flex: 1;
+    }
   }
   .segmented .button {
     min-height: 44px;

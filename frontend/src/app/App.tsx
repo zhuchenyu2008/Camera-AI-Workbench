@@ -196,6 +196,8 @@ function Shell() {
                     className={`nav-item ${active(n.to) ? "active" : ""}`}
                     key={n.to}
                     aria-current={active(n.to) ? "page" : undefined}
+                    aria-label={n.label}
+                    title={n.label}
                   >
                     <n.icon size={18} strokeWidth={1.7} />
                     <span>{n.label}</span>
@@ -210,7 +212,7 @@ function Shell() {
             <ShieldCheck size={17} />
             <span>证据有期限，记录可追溯</span>
           </div>
-          <ScopeLink to="/account" className="account-link">
+          <ScopeLink to="/account" className="account-link" aria-label="账户">
             <span className="avatar">
               {(session?.data.display_name ?? "我").slice(0, 1)}
             </span>

@@ -240,6 +240,19 @@ function SettingsForm({ settings }: { settings: SettingsDto }) {
                     hint={
                       <>
                         {hint}
+                        {key === "frame_retention_minutes" &&
+                          typeof settings.validation_hints
+                            .minimum_retention_minutes === "number" && (
+                            <span>
+                              {" "}
+                              当前已保存配置最低{" "}
+                              {
+                                settings.validation_hints
+                                  .minimum_retention_minutes
+                              }{" "}
+                              分钟；改变超时、采样或重试后，草稿会重新预检。
+                            </span>
+                          )}
                         {base.defaults[key] != null && (
                           <Button
                             type="button"
