@@ -1,8 +1,13 @@
 import { useState } from "react";
-import { CheckCircle2, Plus, Workflow } from "lucide-react";
+import { Plus, Workflow } from "lucide-react";
 import { api, ApiError } from "../../api/client";
 import { invalidate, useApi } from "../../api/query";
-import type { ProviderDto, ProviderWrite } from "../../api/generated/types";
+import type {
+  ProviderDto,
+  ProviderWrite,
+  ProviderPricingDto,
+  ProviderPricingWrite,
+} from "../../api/generated/types";
 import { fields } from "../../api/generated/fields";
 import { useAction } from "../../shared/hooks";
 import {
@@ -28,6 +33,7 @@ export function AISettings() {
       query: { limit: 50, cursor: scope.search.get("cursor") },
     }),
     [editing, setEditing] = useState<ProviderDto | "new" | null>(null),
+    [pricingProvider, setPricingProvider] = useState<ProviderDto | null>(null),
     [job, setJob] = useState<string | null>(null),
     [deleting, setDeleting] = useState<ProviderDto | null>(null),
     action = useAction<unknown>();
@@ -44,6 +50,7 @@ export function AISettings() {
           </Button>
         }
       />
+      <ExchangeRatePanel />
       <Panel title="已配置服务">
         <QueryState query={q}>
           {({ data, page }) => (
@@ -104,6 +111,7 @@ export function AISettings() {
                               "、",
                             ) || "待验证"}
                           </Badge>
+                          <ProviderPricingBadge providerId={p.id} />
                         </div>
                         {p.last_test_error && (
                           <p className="caption">
@@ -112,6 +120,9 @@ export function AISettings() {
                         )}
                       </div>
                       <div className="actions">
+                        <Button onClick={() => setPricingProvider(p)}>
+                          价格设置
+                        </Button>
                         <Button onClick={() => setEditing(p)}>编辑配置</Button>
                         <Button
                           busy={action.pending}
@@ -162,6 +173,16 @@ export function AISettings() {
           onSaved={() => {
             setEditing(null);
             void invalidate("listProviders", "getSettings");
+          }}
+        />
+      )}
+      {pricingProvider && (
+        <ProviderPricingModal
+          provider={pricingProvider}
+          onClose={() => setPricingProvider(null)}
+          onSaved={() => {
+            setPricingProvider(null);
+            void invalidate("getProviderPricing", "listProviders");
           }}
         />
       )}
@@ -435,3 +456,322 @@ function ProviderEditor({
     </Modal>
   );
 }
+
+function ExchangeRatePanel() {
+  const q = useApi("getExchangeRate", {}),
+    action = useAction<unknown>();
+  return (
+    <Panel
+      title="美元参考汇率"
+      action={
+        <Button
+          busy={action.pending}
+          onClick={() =>
+            void action.run(["refreshExchangeRate"], async (key) => {
+              await api("refreshExchangeRate", { intent: key });
+              await invalidate("getExchangeRate");
+            })
+          }
+        >
+          刷新汇率
+        </Button>
+      }
+    >
+      <QueryState query={q}>
+        {({ data: r }) => (
+          <div
+            className="row-between"
+            style={{ alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}
+          >
+            <div>
+              <div
+                className="row-wrap"
+                style={{ alignItems: "center", gap: "0.5rem" }}
+              >
+                <strong>
+                  {r.rate ? `1 USD = ¥${r.rate} CNY` : "未获取汇率"}
+                </strong>
+                <Badge
+                  tone={
+                    r.status === "valid"
+                      ? "success"
+                      : r.status === "expired"
+                        ? "warning"
+                        : "neutral"
+                  }
+                >
+                  {r.status === "valid"
+                    ? "汇率有效（7自然日内）"
+                    : r.status === "expired"
+                      ? "已超过7日缓存"
+                      : "未配置"}
+                </Badge>
+              </div>
+              <p className="caption muted">
+                报价日期：{r.rate_date ?? "暂无"} · 来源：{r.source ?? "ECB"}
+              </p>
+            </div>
+            <p className="caption muted" style={{ flex: "1 1 100%", margin: 0 }}>
+              默认采用欧洲中央银行（ECB）每日参考汇率。存在美元定价时，每日 23:15
+              自动检查刷新；调用时按当时快照保存。
+            </p>
+            <ErrorNotice error={action.error} />
+          </div>
+        )}
+      </QueryState>
+    </Panel>
+  );
+}
+
+function ProviderPricingBadge({ providerId }: { providerId: string }) {
+  const q = useApi("getProviderPricing", {
+    path: { provider_id: providerId },
+  });
+  return (
+    <QueryState query={q}>
+      {({ data: p }) => {
+        const cfg = p.pricing;
+        if (!p.price_configured || !cfg?.currency) {
+          return <Badge tone="neutral">未配置单价</Badge>;
+        }
+        if (!p.applicable) {
+          return (
+            <Badge tone="warning">服务或模型已变更，请重新确认价格</Badge>
+          );
+        }
+        const symbol = cfg.currency === "USD" ? "$" : "¥";
+        return (
+          <Badge tone="success">
+            {cfg.currency} {symbol}
+            {cfg.input_price} 入 · {symbol}
+            {cfg.output_price} 出 / 1M
+          </Badge>
+        );
+      }}
+    </QueryState>
+  );
+}
+
+function ProviderPricingModal({
+  provider,
+  onClose,
+  onSaved,
+}: {
+  provider: ProviderDto;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const q = useApi("getProviderPricing", {
+    path: { provider_id: provider.id },
+  });
+  return (
+    <Modal title={`价格设置 · ${provider.name}`} onClose={onClose} wide>
+      <QueryState query={q}>
+        {({ data: p }) => (
+          <ProviderPricingForm
+            provider={provider}
+            pricing={p}
+            onClose={onClose}
+            onSaved={onSaved}
+          />
+        )}
+      </QueryState>
+    </Modal>
+  );
+}
+
+function ProviderPricingForm({
+  provider,
+  pricing,
+  onClose,
+  onSaved,
+}: {
+  provider: ProviderDto;
+  pricing: ProviderPricingDto;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const cfg = pricing.pricing,
+    [currency, setCurrency] = useState<"CNY" | "USD">(
+      cfg?.currency ?? "CNY",
+    ),
+    [inputPrice, setInputPrice] = useState(cfg?.input_price ?? ""),
+    [outputPrice, setOutputPrice] = useState(cfg?.output_price ?? ""),
+    [cachedInputPrice, setCachedInputPrice] = useState(
+      cfg?.cached_input_price ?? "",
+    ),
+    [sourceNote, setSourceNote] = useState(cfg?.source_note ?? ""),
+    [baseRev, setBaseRev] = useState(pricing.pricing_revision),
+    action = useAction<unknown>();
+
+  const isMismatched = pricing.price_configured && !pricing.applicable;
+
+  return (
+    <form
+      className="stack"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const body: ProviderPricingWrite = {
+          provider_revision: provider.revision,
+          pricing_revision: baseRev,
+          currency,
+          input_price: inputPrice.trim(),
+          output_price: outputPrice.trim(),
+          cached_input_price: cachedInputPrice.trim()
+            ? cachedInputPrice.trim()
+            : null,
+          source_note: sourceNote.trim(),
+        };
+        void action.run([baseRev, body], async (intent) => {
+          await api("updateProviderPricing", {
+            path: { provider_id: provider.id },
+            revision: baseRev,
+            intent,
+            body,
+          });
+          onSaved();
+        });
+      }}
+    >
+      {isMismatched && (
+        <Notice tone="warning">
+          当前保存的价格（v{pricing.pricing_revision}）绑定于模型「
+          {pricing.bound_model ?? "未知"}」及地址「
+          {pricing.bound_base_url ?? "未知"}
+          」，与当前服务配置不符，已停止应用于新调用。请重新确认并提交新单价。
+        </Notice>
+      )}
+
+      <div className="form-grid">
+        <Field label="绑定服务地址" hint="价格与服务地址及模型名称绑定">
+          <input value={provider.base_url} disabled />
+        </Field>
+        <Field label="绑定模型名称">
+          <input value={provider.model} disabled />
+        </Field>
+        <Field label="币种">
+          <select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value as "CNY" | "USD")}
+          >
+            <option value="CNY">CNY（人民币 ¥）</option>
+            <option value="USD">USD（美元 $）</option>
+          </select>
+        </Field>
+        <Field
+          label={`普通输入单价（${currency} / 100 万 Token）`}
+          hint="必填，允许为 0，格式如 2.5 或 0"
+        >
+          <input
+            name="input_price"
+            required
+            pattern="^(0|[1-9]\d*)(\.\d{1,6})?$"
+            placeholder="例如 2.5"
+            value={inputPrice}
+            onChange={(e) => setInputPrice(e.target.value)}
+          />
+        </Field>
+        <Field
+          label={`普通输出单价（${currency} / 100 万 Token）`}
+          hint="必填，允许为 0，格式如 5.0 或 0"
+        >
+          <input
+            name="output_price"
+            required
+            pattern="^(0|[1-9]\d*)(\.\d{1,6})?$"
+            placeholder="例如 5.0"
+            value={outputPrice}
+            onChange={(e) => setOutputPrice(e.target.value)}
+          />
+        </Field>
+        <Field
+          label={`缓存输入单价（${currency} / 100 万 Token）`}
+          hint="可选。留空表示缓存与普通输入单价相同"
+        >
+          <input
+            name="cached_input_price"
+            pattern="^(0|[1-9]\d*)(\.\d{1,6})?$"
+            placeholder="可选，留空按普通输入计费"
+            value={cachedInputPrice}
+            onChange={(e) => setCachedInputPrice(e.target.value)}
+          />
+        </Field>
+        <Field
+          label="价格来源说明"
+          hint="必填。请记录官网价格页、折扣合同或计费规则说明"
+        >
+          <input
+            name="source_note"
+            required
+            maxLength={500}
+            placeholder="例如：官网公开发布价格 2026-10"
+            value={sourceNote}
+            onChange={(e) => setSourceNote(e.target.value)}
+          />
+        </Field>
+      </div>
+
+      <p className="caption muted">
+        当前价格版本：v{baseRev}
+        {pricing.updated_at && ` · 最近更新：${dateTime(pricing.updated_at)}`}
+        {" · 单独版本管理，修改价格不清空能力测试结果。"}
+      </p>
+
+      <ErrorNotice error={action.error} />
+
+      {action.error instanceof ApiError && action.error.status === 412 && (
+        <Button
+          type="button"
+          onClick={() =>
+            void api("getProviderPricing", {
+              path: { provider_id: provider.id },
+            }).then((r) => {
+              setBaseRev(r.data.pricing_revision);
+              action.setError(null);
+            })
+          }
+        >
+          读取服务器最新版本并重试
+        </Button>
+      )}
+
+      <div className="row-between">
+        <div>
+          {pricing.price_configured && (
+            <Button
+              type="button"
+              variant="danger"
+              busy={action.pending}
+              onClick={() => {
+                void action.run([baseRev, "clear"], async (intent) => {
+                  await api("updateProviderPricing", {
+                    path: { provider_id: provider.id },
+                    revision: baseRev,
+                    intent,
+                    body: {
+                      provider_revision: provider.revision,
+                      pricing_revision: baseRev,
+                      clear: true,
+                    },
+                  });
+                  onSaved();
+                });
+              }}
+            >
+              清空价格
+            </Button>
+          )}
+        </div>
+        <div className="actions end">
+          <Button type="button" onClick={onClose}>
+            取消
+          </Button>
+          <Button type="submit" variant="primary" busy={action.pending}>
+            保存价格
+          </Button>
+        </div>
+      </div>
+    </form>
+  );
+}
+

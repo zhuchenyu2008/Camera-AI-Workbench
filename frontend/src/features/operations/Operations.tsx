@@ -24,12 +24,57 @@ import type {
 } from "../../api/generated/types";
 const num = (n: unknown) =>
   typeof n === "number" ? n.toLocaleString("zh-CN") : "未知";
+
+export function formatCnyCost(amountStr: string | null | undefined): string {
+  if (amountStr == null) return "未折算";
+  const val = parseFloat(amountStr);
+  if (isNaN(val)) return amountStr;
+  if (val === 0) return "¥0";
+  if (val > 0 && val < 0.000001) return "小于 ¥0.000001";
+  const parts = amountStr.split(".");
+  if (parts.length === 1) {
+    return `¥${parts[0]}.00`;
+  }
+  let decimals = parts[1];
+  if (decimals.length < 2) {
+    decimals = decimals.padEnd(2, "0");
+  } else if (decimals.length > 6) {
+    decimals = decimals.slice(0, 6);
+  }
+  return `¥${parts[0]}.${decimals}`;
+}
+
+export const COST_REASON_LABELS: Record<string, string> = {
+  missing_pricing: "未配置模型单价",
+  pricing_mismatch: "模型或地址变更未确认价格",
+  missing_exchange_rate: "未获取汇率",
+  expired_exchange_rate: "汇率缓存已过期",
+  missing_tokens: "未返回 Token 用量",
+  negative_usage: "用量数值异常",
+};
+
 export function tokenText(token: TokenTotal) {
   return token.value == null
     ? "未知"
     : `${num(token.value)}${token.unknown_count ? `（另 ${token.unknown_count} 次未知）` : ""}`;
 }
+
 export function costText(value: UsageTotal) {
+  if (value.cost_summary) {
+    const s = value.cost_summary;
+    if (s.completeness === "full") {
+      return formatCnyCost(s.estimated_cny_subtotal);
+    }
+    if (s.completeness === "partial") {
+      const missing = s.unconverted_requests + s.unpriced_requests;
+      return `已知 ${formatCnyCost(s.estimated_cny_subtotal)}（${missing} 笔缺失）`;
+    }
+    if (value.requests === 0) return "¥0";
+    if (s.unpriced_requests > 0) return "未配置单价";
+    if (s.unconverted_requests > 0) return "未折算";
+    if (s.reasons.length) return COST_REASON_LABELS[s.reasons[0]] ?? s.reasons[0];
+    return "无法估算";
+  }
   return value.cost == null
     ? "未配置"
     : `${value.currency ?? "币种未知"} ${value.cost}${value.cost_estimated ? " · 估算" : ""}`;
@@ -114,9 +159,6 @@ export function Status() {
                     description="添加摄像头后可查看实际采集状态。"
                   />
                 )}
-                <p className="caption muted">
-                  家庭路由器与中间链路：未独立检测。
-                </p>
               </Panel>
               <Panel title="应用与模型服务" action={<Activity size={18} />}>
                 <dl className="definition-list">
@@ -427,17 +469,72 @@ export function Usage() {
                 hint={`${u.totals.unknown_usage_requests} 次请求用量未知`}
               />
               <Stat
-                label="费用"
-                value={costText(u.totals)}
+                label="人民币估算费用"
+                value={
+                  u.totals.cost_summary
+                    ? u.totals.cost_summary.completeness === "full"
+                      ? formatCnyCost(u.totals.cost_summary.estimated_cny_subtotal)
+                      : u.totals.cost_summary.completeness === "partial"
+                        ? `已知估算 ${formatCnyCost(u.totals.cost_summary.estimated_cny_subtotal)}`
+                        : u.totals.requests === 0
+                          ? "¥0"
+                          : "无法估算"
+                    : costText(u.totals)
+                }
                 hint={
-                  u.totals.cost_estimated
-                    ? "按已配置单价估算"
-                    : "未配置单价不推算金额"
+                  u.totals.cost_summary
+                    ? u.totals.cost_summary.completeness === "full"
+                      ? `已折算 ${u.totals.cost_summary.converted_requests} 次请求`
+                      : u.totals.cost_summary.completeness === "partial"
+                        ? `${u.totals.cost_summary.converted_requests} 次已折算 · 另有 ${u.totals.cost_summary.unconverted_requests + u.totals.cost_summary.unpriced_requests} 次缺失`
+                        : u.totals.requests === 0
+                          ? "此范围无模型调用"
+                          : u.totals.cost_summary.reasons.map((r) => COST_REASON_LABELS[r] ?? r).join("、") || "缺少价格或汇率"
+                    : u.totals.cost_estimated
+                      ? "按已配置单价估算"
+                      : "未配置单价不推算金额"
                 }
               />
             </div>
+            {u.totals.cost_summary && (
+              <div className="inset stack" style={{ marginBottom: "1rem" }}>
+                <div className="row-between">
+                  <span className="caption">
+                    <strong>费用核算明细：</strong>
+                    已折算 {u.totals.cost_summary.converted_requests} 次
+                    {u.totals.cost_summary.unconverted_requests > 0 &&
+                      ` · 未折算 ${u.totals.cost_summary.unconverted_requests} 次`}
+                    {u.totals.cost_summary.unpriced_requests > 0 &&
+                      ` · 未计价 ${u.totals.cost_summary.unpriced_requests} 次`}
+                  </span>
+                  {Object.keys(u.totals.cost_summary.by_currency).length > 0 && (
+                    <span className="caption">
+                      <strong>原币金额：</strong>
+                      {Object.entries(u.totals.cost_summary.by_currency)
+                        .map(
+                          ([curr, amt]) =>
+                            `${curr === "USD" ? "$" : "¥"}${amt} ${curr}`,
+                        )
+                        .join(" · ")}
+                    </span>
+                  )}
+                </div>
+                {(u.totals.cost_summary.reasons.length > 0 ||
+                  u.totals.cost_summary.applicable_price_revisions.length > 0 ||
+                  u.totals.cost_summary.exchange_rate_dates.length > 0) && (
+                  <p className="caption muted">
+                    {u.totals.cost_summary.applicable_price_revisions.length > 0 &&
+                      `适用价格版本：v${u.totals.cost_summary.applicable_price_revisions.join("、v")} · `}
+                    {u.totals.cost_summary.exchange_rate_dates.length > 0 &&
+                      `适用汇率报价日期：${u.totals.cost_summary.exchange_rate_dates.join("、")} · `}
+                    {u.totals.cost_summary.reasons.length > 0 &&
+                      `未完成计价原因：${u.totals.cost_summary.reasons.map((r) => COST_REASON_LABELS[r] ?? r).join("、")}`}
+                  </p>
+                )}
+              </div>
+            )}
             <Panel
-              title="调用明细"
+              title="用量分组明细"
               action={<span className="caption muted">表格可横向滚动</span>}
             >
               {u.buckets.length ? (
@@ -458,7 +555,7 @@ export function Usage() {
                         <th>输入 Token</th>
                         <th>输出 Token</th>
                         <th>缓存 Token</th>
-                        <th>费用</th>
+                        <th>人民币估算费用</th>
                       </tr>
                     </thead>
                     <tbody>

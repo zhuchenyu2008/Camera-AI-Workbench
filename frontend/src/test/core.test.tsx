@@ -24,7 +24,7 @@ import {
 } from "../shared/time";
 import { containedRect, normalizePoint, polygonError } from "../shared/roi";
 import { sourceHref, Field, ErrorNotice } from "../shared/components";
-import { tokenText, costText } from "../features/operations/Operations";
+import { tokenText, costText, formatCnyCost } from "../features/operations/Operations";
 import { useEphemeralImage } from "../shared/media/EphemeralImage";
 import { useAction } from "../shared/hooks";
 import { mergedWeek, defaultOverrideEnd } from "../shared/schedule";
@@ -227,6 +227,56 @@ describe("契约、错误与幂等", () => {
       tokenText({ value: 200, known_count: 1, unknown_count: 2 }),
     ).toContain("另 2 次未知");
     expect(costText({ cost: null } as never)).toBe("未配置");
+
+    // 人民币费用格式化与小额精度
+    expect(formatCnyCost(null)).toBe("未折算");
+    expect(formatCnyCost("0")).toBe("¥0");
+    expect(formatCnyCost("0.0000001")).toBe("小于 ¥0.000001");
+    expect(formatCnyCost("24.5")).toBe("¥24.50");
+    expect(formatCnyCost("0.014")).toBe("¥0.014");
+
+    // 费用核算完整度与说明
+    expect(
+      costText({
+        requests: 2,
+        cost_summary: {
+          completeness: "full",
+          estimated_cny_subtotal: "24.5",
+          converted_requests: 2,
+          unconverted_requests: 0,
+          unpriced_requests: 0,
+          reasons: [],
+        },
+      } as never),
+    ).toBe("¥24.50");
+
+    expect(
+      costText({
+        requests: 3,
+        cost_summary: {
+          completeness: "partial",
+          estimated_cny_subtotal: "10.5",
+          converted_requests: 1,
+          unconverted_requests: 1,
+          unpriced_requests: 1,
+          reasons: ["missing_exchange_rate"],
+        },
+      } as never),
+    ).toContain("已知 ¥10.50（2 笔缺失）");
+
+    expect(
+      costText({
+        requests: 1,
+        cost_summary: {
+          completeness: "none",
+          estimated_cny_subtotal: null,
+          converted_requests: 0,
+          unconverted_requests: 1,
+          unpriced_requests: 0,
+          reasons: ["missing_exchange_rate"],
+        },
+      } as never),
+    ).toBe("未折算");
   });
   it("共享 fixture 覆盖值守恒", () => {
     const c = fixture.overview.data.coverage;
