@@ -122,6 +122,13 @@ def serve(config: Config) -> None:
         vite = ROOT / "frontend/node_modules/vite/bin/vite.js"
         if not node or not vite.is_file():
             raise RuntimeError("缺少 Node.js 或前端依赖，请运行 start-local.ps1 -Install")
+        help_build = subprocess.run(
+            [node, str(ROOT / "frontend/scripts/build-help.mjs")],
+            cwd=ROOT / "frontend",
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        if help_build.returncode:
+            raise RuntimeError("内置帮助生成失败，请检查前端依赖和 docs 目录")
         initialize(config)
         stop_file.unlink(missing_ok=True)
         stopped = threading.Event()

@@ -204,11 +204,46 @@ class Discovery:
             ).first()
         )
 
+    def manual_identity(self, conn, candidate):
+        """同一现场图的同一区域复算时，沿用人工修正的出现身份。"""
+        box = candidate["candidate_json"]["crop"]
+        matches = set()
+        rows = conn.execute(
+            select(s.entity_occurrences).where(
+                s.entity_occurrences.c.manual.is_(True),
+                s.entity_occurrences.c.camera_id == candidate["camera_id"],
+                s.entity_occurrences.c.evidence_id == candidate["candidate_json"]["evidence_id"],
+            )
+        ).mappings()
+        for row in rows:
+            other = row["crop_json"]
+            width = max(
+                0, min(box["x"] + box["width"], other["x"] + other["width"]) - max(box["x"], other["x"])
+            )
+            height = max(
+                0,
+                min(box["y"] + box["height"], other["y"] + other["height"]) - max(box["y"], other["y"]),
+            )
+            intersection = width * height
+            area = box["width"] * box["height"] + other["width"] * other["height"] - intersection
+            if not area or intersection / area < 0.7:
+                continue
+            entity_id = self.resolve(conn, row["entity_id"])
+            entity = one(conn, s.entities, entity_id, deleted=True)
+            if (
+                entity["kind"] == candidate["candidate_json"]["kind"]
+                and entity["enabled"]
+                and not entity["deleted_at_ms"]
+            ):
+                matches.add(entity_id)
+        return matches.pop() if len(matches) == 1 else None
+
     def archive(self, conn, pending, groups):
         pending = [r for r in pending if one(conn, s.discovery_candidates, r["id"])["state"] == "pending"]
         if not pending:
             return set()
         by_id = {r["id"]: r for r in pending}
+        manual_ids = {r["id"]: self.manual_identity(conn, r) for r in pending}
         seen, affected = set(), set()
         for group in groups:
             keys = group["candidate_keys"]
@@ -218,13 +253,27 @@ class Discovery:
             kinds = {by_id[k]["candidate_json"]["kind"] for k in keys}
             if len(kinds) != 1:
                 raise AppError(422, "INVALID_MODEL_REFERENCES", "人物和物品不能合并")
-            entity_id = self.resolve(conn, group.get("entity_id")) if group.get("entity_id") else None
+            forced = {manual_ids[k] for k in keys} - {None}
+            if len(forced) > 1:
+                affected.update(
+                    self.archive(
+                        conn,
+                        [by_id[k] for k in keys],
+                        [dict(candidate_keys=[k], entity_id=manual_ids[k]) for k in keys],
+                    )
+                )
+                continue
+            proposed = next(iter(forced)) if forced else group.get("entity_id")
+            entity_id = self.resolve(conn, proposed) if proposed else None
             entity = one(conn, s.entities, entity_id) if entity_id else None
             if entity and (entity["kind"] not in kinds or not entity["enabled"]):
                 entity_id = None
             # 已有人工拆分关系不允许被自动合并回去。
-            hints = {by_id[k]["candidate_json"].get("matched_entity_id") for k in keys} - {None}
-            hints = {self.resolve(conn, hint) for hint in hints}
+            # 人工修正优先于这张图的旧自动匹配提示。
+            hints = {
+                manual_ids[k] or self.resolve(conn, by_id[k]["candidate_json"].get("matched_entity_id"))
+                for k in keys
+            } - {None}
             if any(self.separated(conn, a, b) for a in hints for b in hints if a < b):
                 affected.update(
                     self.archive(
@@ -264,7 +313,7 @@ class Discovery:
                         evidence_id=candidate["evidence_id"],
                         crop_json=candidate["crop"],
                         links_json=row["links_json"],
-                        manual=False,
+                        manual=manual_ids[key] is not None,
                         created_at_ms=self.w.now(),
                     )
                 )
@@ -442,6 +491,8 @@ class Discovery:
             )
             if old["result_json"].get("has_manual_revision") and not manual:
                 continue
+            if not manual and link["role"] == "subject" and old["result_json"].get("manual_subject_id"):
+                continue
             spans = self.w.ledger.spans(conn, [minute["camera_id"]], start, start + 60000)
             changed = False
             for span in spans:
@@ -455,9 +506,9 @@ class Discovery:
                 elif link["role"] == "object" and candidate_key in details.get("object_candidate_keys", []):
                     ids = details.get("object_ids", [])
                     previous = occurrence.get("previous_entity_id")
-                    details["object_ids"] = sorted(
-                        {i for i in ids if i != previous} | {occurrence["entity_id"]}
-                    )
+                    assigned = {i for i in ids if i != previous} | {occurrence["entity_id"]}
+                    mapping = {} if manual else old["result_json"].get("manual_object_assignments", {})
+                    details["object_ids"] = sorted({mapping.get(i, i) for i in assigned})
                     span["details_json"] = details
                     changed = True
             if not changed:

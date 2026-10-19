@@ -113,7 +113,7 @@ export function Entities() {
               ) : (
                 <EmptyState
                   title="尚无参考档案"
-                  description="开启自动建档后，定期分析会生成人物和相关物品；也可以手动添加参考资料。"
+                  description="开启自动建档后，画面分析会生成人物和相关物品；也可以手动添加参考资料。"
                 />
               )}
               <Pager hasMore={page.has_more} nextCursor={page.next_cursor} />

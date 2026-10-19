@@ -221,7 +221,7 @@ export function ReportDetail() {
             s.completeness === "with_gaps" ? (
               <Notice tone="warning" title={summaryLabel(s)}>
                 {s.source_state === "stale"
-                  ? "当前文字来自旧版来源，新汇总尚未完成，旧版继续可读。"
+                  ? "统计已按当前记录更新；当前文字仍来自旧版来源，可按需重新生成。"
                   : s.summary_state === "failed"
                     ? "文字生成失败，确定性统计仍然保留。"
                     : s.summary_state === "provisional"

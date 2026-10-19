@@ -99,7 +99,7 @@ class Executor:
         )
         labels = payload.get("activity_labels", cfg.activity_labels)
         content.append({"type": "text", "text": "允许标签：" + canonical(labels)})
-        discovery_enabled = cfg.auto_discovery_enabled and payload.get("mode") == "sparse"
+        discovery_enabled = cfg.auto_discovery_enabled
         content.append({"type": "text", "text": "自动建档：" + ("开启" if discovery_enabled else "关闭")})
         body = build_payload(provider, VisualOutput, content, VISUAL_PROMPT)
         # 图片在请求缓冲中仅保留当前一批；临近发送重新校验 TTL 与撤销状态。

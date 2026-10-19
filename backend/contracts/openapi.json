@@ -13058,7 +13058,8 @@
           "is_primary_subject": {
             "type": "boolean",
             "title": "Is Primary Subject",
-            "default": false
+            "default": false,
+            "deprecated": true
           }
         },
         "additionalProperties": false,
@@ -13316,7 +13317,8 @@
                 "type": "null"
               }
             ],
-            "title": "Is Primary Subject"
+            "title": "Is Primary Subject",
+            "deprecated": true
           }
         },
         "additionalProperties": false,

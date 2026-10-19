@@ -1,17 +1,8 @@
-import {
-  ArrowRight,
-  Camera,
-  ChevronRight,
-  Clock3,
-  Plus,
-  ScanLine,
-} from "lucide-react";
+import { ArrowRight, Camera, Clock3, Plus, ScanLine } from "lucide-react";
 import { useAllApi, useApi } from "../../api/query";
 import {
   ActivityChart,
   Badge,
-  Button,
-  CheckItem,
   CoverageTrack,
   EmptyState,
   EventList,
@@ -37,7 +28,6 @@ import { TimelineStrip } from "../timeline/TimelineStrip";
 export function Overview() {
   const scope = useScope();
   const cameras = useAllApi("listCameras", undefined, { poll: 5000 }),
-    providers = useAllApi("listProviders"),
     settings = useApi("getSettings");
   const defaultCamera =
     cameras.data?.find((c) => c.enabled && !c.deleted_at) ?? cameras.data?.[0];
@@ -68,33 +58,7 @@ export function Overview() {
 
   const cameraList = cameras.data ?? [];
   const camera =
-    cameraList.find((c) => c.id === scope.camera_ids[0]) ?? cameraList[0];
-
-  const isGuideLoading =
-    cameras.isLoading || providers.isLoading || settings.isLoading;
-  const isGuideError = cameras.isError || providers.isError || settings.isError;
-
-  const visionProviderId = settings.data?.data.config.vision_provider_id;
-  const visionProvider = visionProviderId
-    ? providers.data?.find((p) => p.id === visionProviderId)
-    : undefined;
-  const step1Done = Boolean(
-    visionProvider &&
-      visionProvider.tested_config_revision === visionProvider.revision &&
-      visionProvider.capabilities.vision === true,
-  );
-  const step3Done = Boolean(cameraList.filter((c) => !c.deleted_at).length > 0);
-  const step4Done = Boolean(
-    cameraList.some(
-      (c) =>
-        c.enabled &&
-        !c.deleted_at &&
-        c.last_test != null &&
-        (c.last_test as { source_revision?: number }).source_revision ===
-          c.source_revision,
-    ),
-  );
-  const allStepsDone = step1Done && step3Done && step4Done;
+    cameraList.find((c) => c.id === scope.camera_ids[0]) ?? defaultCamera;
 
   return (
     <>
@@ -110,60 +74,18 @@ export function Overview() {
         }
       />
       <ScopePicker />
-      {!allStepsDone && (
-        <Panel title="开始记录你的第一天" kicker="GET STARTED">
-          <p className="muted">
-            完成以下配置，等待第一分钟记录。每一步的状态来自服务器。
-          </p>
-          {isGuideLoading ? (
-            <p className="caption muted">正在读取配置与设备状态...</p>
-          ) : isGuideError ? (
-            <Notice tone="danger">
-              读取配置与设备状态失败。
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  void settings.refetch();
-                  void providers.refetch();
-                  void cameras.refetch();
-                }}
-              >
-                重试
-              </Button>
-            </Notice>
-          ) : (
-            <div className="setup-grid">
-              <CheckItem done={step1Done}>
-                <ScopeLink to="/settings/ai">
-                  <strong>01 配置 AI 服务</strong>
-                  <span>测试图片与结构化输出能力</span>
-                  <ChevronRight size={16} />
-                </ScopeLink>
-              </CheckItem>
-
-              <CheckItem done={step3Done}>
-                <ScopeLink to="/cameras/new">
-                  <strong>02 添加摄像头</strong>
-                  <span>测试连接、设置计划与区域</span>
-                  <ChevronRight size={16} />
-                </ScopeLink>
-              </CheckItem>
-              <CheckItem done={step4Done}>
-                <ScopeLink to="/cameras">
-                  <strong>03 测试并启用</strong>
-                  <span>确认保存范围，等待首次记录</span>
-                  <ChevronRight size={16} />
-                </ScopeLink>
-              </CheckItem>
-            </div>
-          )}
-          {cameraList.length === 0 && (
-            <ScopeLink className="button primary" to="/cameras/new">
-              <Plus size={17} />
-              添加第一台摄像头
-            </ScopeLink>
-          )}
+      {cameras.isSuccess && cameraList.length === 0 && (
+        <Panel title="机位与画面" kicker="CAMERA / LIVE VIEW">
+          <EmptyState
+            title="尚未配置摄像头"
+            description="添加机位后，这里会显示画面与活动记录。"
+            action={
+              <ScopeLink className="button primary" to="/cameras/new">
+                <Plus size={17} />
+                添加摄像头
+              </ScopeLink>
+            }
+          />
         </Panel>
       )}
       {cameraList.length > 0 && (

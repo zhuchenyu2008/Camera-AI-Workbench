@@ -320,7 +320,7 @@ class EntityCreate(Strict):
     description: Annotated[str, Field(max_length=1000)] = ""
     camera_ids: Annotated[list[str], Field(max_length=32)] = []
     enabled: bool = False
-    is_primary_subject: bool = False
+    is_primary_subject: bool = Field(default=False, deprecated=True)
 
 
 class EntityPatch(Strict):
@@ -328,7 +328,7 @@ class EntityPatch(Strict):
     description: Annotated[str, Field(max_length=1000)] | None = None
     camera_ids: Annotated[list[str], Field(max_length=32)] | None = None
     enabled: bool | None = None
-    is_primary_subject: bool | None = None
+    is_primary_subject: bool | None = Field(default=None, deprecated=True)
 
     @model_validator(mode="after")
     def non_null(self):

@@ -82,9 +82,11 @@ def test_scene_activity_does_not_require_identity(w):
     assert personal["coverage"]["unknown_ms"] == 60000
 
 
-async def test_visual_to_archive_and_cross_camera_matching(w, jpeg, clock):
+@pytest.mark.parametrize("mode", ["sparse", "dense"])
+async def test_visual_to_archive_and_cross_camera_matching(w, jpeg, clock, mode):
     make_provider(w)
     calls = []
+    forced_wrong_entity = [None]
 
     def respond(request):
         body = json.loads(request.content)
@@ -97,7 +99,14 @@ async def test_visual_to_archive_and_cross_camera_matching(w, jpeg, clock):
                     c["text"].split("：", 1)[1] for c in content if c.get("text", "").startswith("已有档案：")
                 )
             )
-            result = {"groups": [{"candidate_keys": [candidate["key"]], "entity_id": reference["entity_id"]}]}
+            result = {
+                "groups": [
+                    {
+                        "candidate_keys": [candidate["key"]],
+                        "entity_id": forced_wrong_entity[0] or reference["entity_id"],
+                    }
+                ]
+            }
             calls.append("match")
         else:
             frame = json.loads(
@@ -116,7 +125,7 @@ async def test_visual_to_archive_and_cross_camera_matching(w, jpeg, clock):
         for _ in range(2):
             camera, _, frame = make_frame(w, jpeg, clock)
             with w.db.write() as conn:
-                Analysis(w).plan(conn, camera, [frame], w.assets.reference_set(conn, [camera]), "sparse")
+                Analysis(w).plan(conn, camera, [frame], w.assets.reference_set(conn, [camera]), mode)
             await drain(w, Executor(w, Supervisor(w), client))
             # 新的时间桶让第二次归档立即排队。
             with w.db.write() as conn:
@@ -166,12 +175,30 @@ async def test_visual_to_archive_and_cross_camera_matching(w, jpeg, clock):
                 "dense",
                 manual=True,
             )
+        forced_wrong_entity[0] = source_entity["id"]
         await drain(w, Executor(w, Supervisor(w), client))
+        with w.db.write() as conn:
+            enqueue(
+                conn,
+                w.now(),
+                "entity_discovery",
+                {"provider_id": w.settings_config(conn).vision_provider_id},
+                "archive-after-manual-split",
+            )
+        await drain(w, Executor(w, Supervisor(w), client))
+        assert calls[-1] == "match"
         with w.db.read() as conn:
             minute_id = conn.execute(
                 select(s.minute_records.c.id).where(s.minute_records.c.camera_id == occurrence["camera_id"])
             ).scalar_one()
             assert Records(w).minute(conn, minute_id)["segments"][0]["subject_id"] == split["id"]
+            latest = conn.execute(
+                select(s.entity_occurrences.c.entity_id).where(
+                    s.entity_occurrences.c.camera_id == occurrence["camera_id"],
+                    s.entity_occurrences.c.source_key != occurrence["source_key"],
+                )
+            ).scalar_one()
+            assert latest == split["id"]
     finally:
         await client.close()
 
