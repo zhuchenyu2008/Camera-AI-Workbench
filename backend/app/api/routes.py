@@ -73,6 +73,7 @@ from app.services.assets import decode_image
 from app.services.records import Records
 from app.summaries.service import Summaries
 from app.timeutils import BEIJING, day_range, iso
+from app.version import API_VERSION
 from app.worker.queue import TERMINAL, enqueue, job_dto
 
 router = APIRouter()
@@ -83,7 +84,7 @@ Limit = Annotated[int, Query(ge=1, le=100)]
 def health():
     from app.repositories.db import SCHEMA_VERSION
 
-    return {"alive": True, "api_version": "2.0", "database_schema": SCHEMA_VERSION}
+    return {"alive": True, "api_version": API_VERSION, "database_schema": SCHEMA_VERSION}
 
 
 @router.post("/api/session", operation_id="login", response_model=Envelope[SessionDto])

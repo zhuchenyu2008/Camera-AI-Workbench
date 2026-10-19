@@ -113,6 +113,51 @@ def fake_visual(request, person, *, activity="reading", ref_assert=None):
     )
 
 
+def _reset_job_for_retry(w, job_id):
+    with w.db.write() as conn:
+        conn.execute(s.jobs.update().where(s.jobs.c.id == job_id).values(not_before_ms=w.now()))
+
+
+def test_model_protocol_error_gets_only_one_retry(w):
+    from app.worker.queue import enqueue
+
+    with w.db.write() as conn:
+        job = enqueue(conn, w.now(), "sparse_analysis", {}, "model-protocol-retry")
+    error = AppError(422, "INVALID_MODEL_REFERENCES", "引用无效")
+
+    first = w.queue.claim("worker")
+    w.queue.fail(first, error)
+    with w.db.read() as conn:
+        saved = one(conn, s.jobs, job["id"])
+        assert saved["state"] == "queued" and saved["failure_count"] == 1
+
+    _reset_job_for_retry(w, job["id"])
+    second = w.queue.claim("worker")
+    w.queue.fail(second, error)
+    with w.db.read() as conn:
+        saved = one(conn, s.jobs, job["id"])
+        assert saved["state"] == "failed" and saved["failure_count"] == 2
+
+
+def test_retryable_model_error_uses_configured_retry_count(w):
+    from app.worker.queue import enqueue
+
+    with w.db.write() as conn:
+        job = enqueue(conn, w.now(), "sparse_analysis", {}, "model-transient-retry")
+    error = AppError(503, "MODEL_TIMEOUT", "模型超时", retryable=True)
+
+    for failure_number in range(1, 5):
+        claimed = w.queue.claim("worker")
+        w.queue.fail(claimed, error)
+        with w.db.read() as conn:
+            saved = one(conn, s.jobs, job["id"])
+            expected_state = "queued" if failure_number < 4 else "failed"
+            assert saved["state"] == expected_state
+            assert saved["failure_count"] == failure_number
+        if failure_number < 4:
+            _reset_job_for_retry(w, job["id"])
+
+
 async def drain(w, executor, maximum=20):
     for _ in range(maximum):
         job = w.queue.claim("test-worker")

@@ -63,6 +63,13 @@ def test_B09_request_upload_boundaries_and_no_secret_errors(client):
         assert response.headers["Cache-Control"] == "private, no-store"
 
 
+def test_B11_status_reports_current_versions(client):
+    response = client.get("/api/status")
+    assert response.status_code == 200
+    assert response.json()["data"]["api_version"] == "2.0"
+    assert response.json()["data"]["db_schema_version"] == "0005"
+
+
 def test_B09_source_and_filesystem_ssrf_guards(w, tmp_path):
     for path in ["//evil/live", "/x\n-y", "/rtsp://evil/live", "/%0aevil", "/foo@evil"]:
         with pytest.raises(ValueError):

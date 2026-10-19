@@ -20,6 +20,7 @@ frontend/.playwright/
 output/playwright/
 *.tsbuildinfo
 frontend/public/help/
+摄像头测试/
 
 output/pytest-*/
 output/activity-upgrade/

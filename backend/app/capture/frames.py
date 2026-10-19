@@ -103,6 +103,7 @@ class FrameWriter:
                             last_frame_at_ms=captured_at,
                             capture_state="online",
                             stop_reason=None,
+                            last_error_code=None,
                             heartbeat_at_ms=self.w.now(),
                         )
                     )

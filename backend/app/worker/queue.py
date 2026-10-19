@@ -366,10 +366,8 @@ class Queue:
                 settings = self.w.settings_config(conn)
                 attempts = current["failure_count"] + 1
                 invalid_output = error.code in {"INVALID_MODEL_OUTPUT", "INVALID_MODEL_REFERENCES"}
-                budget = (
-                    min(2, 1 + settings.ai_retry_count) if invalid_output else 1 + settings.ai_retry_count
-                )
-                retry = (error.retryable or invalid_output) and attempts < budget
+                retry_budget = min(1, settings.ai_retry_count) if invalid_output else settings.ai_retry_count
+                retry = (error.retryable or invalid_output) and attempts <= retry_budget
                 wait = max(
                     int([30000, 120000, 300000][min(max(attempts - 1, 0), 2)] * random.uniform(1, 1.1)),
                     error.details.get("retry_after_ms", 0),

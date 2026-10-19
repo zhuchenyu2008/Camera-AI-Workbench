@@ -71,6 +71,26 @@ def test_B02_real_pts_no_duplicate_or_pixel_based_drop(w, jpeg, clock):
         assert rows[0]["sha256"] == rows[1]["sha256"]
 
 
+def test_B03_successful_frame_clears_stale_source_error(w, jpeg, clock):
+    camera, sid, _ = make_frame(w, jpeg, clock)
+    with w.db.write() as conn:
+        conn.execute(
+            update(s.camera_runtime)
+            .where(s.camera_runtime.c.camera_id == camera)
+            .values(last_error_code="SOURCE_STALE")
+        )
+    clock.advance(1000)
+    assert FrameWriter(w).save(camera, sid, jpeg, w.now(), "2", 2) is not None
+    with w.db.read() as conn:
+        runtime = (
+            conn.execute(select(s.camera_runtime).where(s.camera_runtime.c.camera_id == camera))
+            .mappings()
+            .one()
+        )
+    assert runtime["capture_state"] == "online"
+    assert runtime["last_error_code"] is None
+
+
 def test_B08_eviction_remains_distinguishable_after_index_purge(w, jpeg, clock):
     camera, sid, frame = make_frame(w, jpeg, clock)
     with w.db.write() as conn:

@@ -7,7 +7,9 @@ from decimal import Decimal
 from sqlalchemy import func, select
 
 from app.repositories import schema as s
+from app.repositories.db import SCHEMA_VERSION
 from app.timeutils import BEIJING, iso
+from app.version import API_VERSION
 from app.worker.queue import IMAGE_KINDS
 
 
@@ -125,8 +127,8 @@ def status_data(w):
         )
     return dict(
         server_time=iso(now),
-        api_version="1.0",
-        db_schema_version="0004",
+        api_version=API_VERSION,
+        db_schema_version=SCHEMA_VERSION,
         worker_heartbeat_at=iso(stamp),
         worker_state=state,
         cameras=cameras,
