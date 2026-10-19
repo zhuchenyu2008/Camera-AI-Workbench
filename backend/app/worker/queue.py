@@ -20,7 +20,6 @@ AI_KINDS = IMAGE_KINDS | {
     "summarize_day",
     "manual_records",
     "entity_discovery",
-    "minute_decision",
 }
 
 
@@ -158,6 +157,26 @@ class Queue:
                             finished_at_ms=now,
                             phase="expired",
                             error_code="EVIDENCE_EXPIRED",
+                        )
+                    )
+                    continue
+                if row["kind"] == "minute_decision":
+                    progress = row["progress_json"]
+                    if progress["total_units"] is not None:
+                        progress["completed_units"] = progress["total_units"]
+                    conn.execute(
+                        update(s.jobs)
+                        .where(s.jobs.c.id == row["id"])
+                        .values(
+                            state="succeeded",
+                            phase="succeeded",
+                            queue_reason=None,
+                            finished_at_ms=now,
+                            updated_at_ms=now,
+                            result_json={"status": "skipped", "reason": "分钟决策任务已移除，采用确定性统计"},
+                            progress_json=progress,
+                            error_code=None,
+                            error_json=None,
                         )
                     )
                     continue

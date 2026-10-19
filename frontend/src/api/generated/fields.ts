@@ -364,11 +364,6 @@ export const fields = {
       ],
       "title": "Detail Mode",
       "default": "auto"
-    },
-    "tool_calling": {
-      "type": "boolean",
-      "title": "Tool Calling",
-      "default": false
     }
   },
   "ProviderPricingConfig": {

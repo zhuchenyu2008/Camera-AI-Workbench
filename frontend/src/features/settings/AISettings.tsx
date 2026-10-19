@@ -240,9 +240,14 @@ function ProviderEditor({
       .filter(([, v]) => "default" in v)
       .map(([k, v]) => [k, (v as { default: unknown }).default]),
   );
+  const savedConfig = Object.fromEntries(
+    Object.entries(provider?.config ?? {}).filter(
+      ([field]) => field !== "tool_calling",
+    ),
+  );
   const [config, setConfig] = useState<Record<string, unknown>>({
     ...defaults,
-    ...provider?.config,
+    ...savedConfig,
   });
   const action = useAction<unknown>();
   const numeric: [keyof ProviderWrite, string][] = [

@@ -9,7 +9,6 @@ from pydantic import Field
 from sqlalchemy import select, update
 
 from app.analysis.client import VISUAL_PROMPT, AIClient, build_payload, data_image
-from app.analysis.minute_decision import TOOL_DEFINITIONS, MinuteDecision, MinuteToolRegistry
 from app.analysis.normalize import validate_visual
 from app.errors import AppError
 from app.repositories import schema as s
@@ -65,7 +64,11 @@ class Executor:
             elif kind == "entity_discovery":
                 await self.entity_discovery(job)
             elif kind == "minute_decision":
-                await self.minute_decision(job)
+                await asyncio.to_thread(
+                    self.w.queue.finish,
+                    job,
+                    result={"status": "skipped", "reason": "分钟决策任务已移除，采用确定性统计"},
+                )
             else:
                 raise AppError(422, "UNKNOWN_JOB_KIND", "任务类型不受支持")
         except AppError as exc:
@@ -147,45 +150,6 @@ class Executor:
                 import logging
 
                 logging.getLogger("caw").warning("discovery_stage_failed job_id=%s", job["id"])
-
-    async def minute_decision(self, job):
-        """Review one deterministic minute without owning any duration math."""
-        payload = job["payload_json"]
-        provider, _, limits = await asyncio.to_thread(self.load_provider, job)
-        with self.w.db.read() as conn:
-            registry = MinuteToolRegistry(self.w, conn, payload["camera_id"], payload["minute_start"])
-            packet = registry.minute_packet()
-            content = [{"type": "text", "text": "确定性分钟证据包：" + canonical(packet)}]
-            prompt = (
-                "你是分钟边界复核器。只能根据证据包和只读工具选择固定动作。"
-                "infer_full_minute 只能确认后端已经给出的整分钟边界候选；"
-                "keep_observed 保留实际观察；keep_conflict 保留冲突。"
-                "不得输出时长，不得改变活动名称，不得调用未提供的工具。只输出 JSON。"
-            )
-            body = build_payload(provider, MinuteDecision, content, prompt)
-            if not provider["config_json"].get("tool_calling", False):
-                decision = MinuteDecision(action="keep_observed", reason="工具调用未启用")
-            else:
-                try:
-                    decision, _ = await self.client.call(
-                        job,
-                        provider,
-                        body,
-                        MinuteDecision,
-                        0,
-                        0,
-                        limits,
-                        tools=TOOL_DEFINITIONS,
-                        tool_registry=registry,
-                    )
-                except AppError:
-                    decision = MinuteDecision(action="keep_observed", reason="工具决策不可用，采用确定性结果")
-            audit = registry.audit
-        await asyncio.to_thread(
-            self.w.queue.finish,
-            job,
-            result={"decision": decision.model_dump(mode="json"), "tool_calls": audit},
-        )
 
     async def entity_discovery(self, job):
         from app.security.secrets import safe_path

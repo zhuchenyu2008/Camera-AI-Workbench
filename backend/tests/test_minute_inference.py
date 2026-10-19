@@ -1,18 +1,11 @@
-import json
+from sqlalchemy import update
 
-import httpx
-import pytest
-from sqlalchemy import select, update
-
-from app.analysis.client import AIClient
 from app.analysis.normalize import normalize
-from app.capture.supervisor import Supervisor
 from app.repositories import schema as s
 from app.repositories.db import new_id
 from app.timeutils import iso
-from app.worker.executor import Executor
 from app.worker.queue import enqueue
-from tests.conftest import make_camera, make_minute
+from tests.conftest import make_camera, make_minute, make_provider
 
 
 def _observation(activity, ids, subject_id=None, identity_status="unknown"):
@@ -95,6 +88,27 @@ def test_edge_evidence_in_different_minutes_does_not_infer_across_boundary():
     assert not any(span["details_json"]["inference_mode"] == "edge_estimated" for span in spans)
 
 
+def test_matching_activity_does_not_fill_a_two_minute_capture_gap():
+    first = [str(i) for i in range(10)]
+    last = [f"later-{i}" for i in range(10)]
+    frames = [
+        {"id": str(i), "captured_at": iso(i * 1000)} for i in range(10)
+    ] + [
+        {"id": f"later-{i}", "captured_at": iso(130000 + i * 1000)} for i in range(10)
+    ]
+    spans, _ = normalize(
+        [
+            _output(0, [_observation("writing", first)]),
+            _output(120000, [_observation("writing", last)]),
+        ],
+        frames,
+        [(0, 10000), (130000, 140000)],
+    )
+
+    assert sum(span["end_at_ms"] - span["start_at_ms"] for span in spans) == 20000
+    assert not any(span["details_json"]["inference_mode"] == "edge_estimated" for span in spans)
+
+
 def test_ledger_reports_capture_gap_and_inferred_activity_separately(w, clock):
     camera = make_camera(w)
     start = clock.value
@@ -151,53 +165,22 @@ def test_ledger_reports_capture_gap_and_inferred_activity_separately(w, clock):
     assert result["activities"] == [{"activity": "writing", "duration_ms": 60000, "estimated_ms": 40000}]
 
 
-@pytest.mark.asyncio
-async def test_minute_decision_is_optional_and_audited(w, clock):
-    from tests.conftest import make_provider
-
+def test_legacy_minute_decision_job_is_retired_without_model_call(w):
     provider_id = make_provider(w)
-    camera = make_camera(w)
-    start = clock.value
-    minute_id = make_minute(w, camera, start, activity="writing")
     with w.db.write() as conn:
-        provider = conn.execute(select(s.providers).where(s.providers.c.id == provider_id)).mappings().one()
-        conn.execute(
-            update(s.providers)
-            .where(s.providers.c.id == provider_id)
-            .values(config_json=provider["config_json"] | {"tool_calling": True})
-        )
+        conn.execute(s.providers.update().where(s.providers.c.id == provider_id).values(paused=True))
         job = enqueue(
             conn,
             w.now(),
             "minute_decision",
-            {
-                "provider_id": provider_id,
-                "provider_revision": provider["revision"],
-                "camera_id": camera,
-                "minute_id": minute_id,
-                "minute_start": start,
-            },
+            {"provider_id": provider_id},
             "minute-decision-test",
             total=1,
         )
-    response = {
-        "choices": [
-            {
-                "finish_reason": "stop",
-                "message": {"content": json.dumps({"action": "keep_observed", "reason": "确定性结果"})},
-            }
-        ],
-        "usage": {"prompt_tokens": 12, "completion_tokens": 4},
-    }
-    client = AIClient(w, httpx.MockTransport(lambda _: httpx.Response(200, json=response)))
-    try:
-        claimed = w.queue.claim("test-worker")
-        await Executor(w, Supervisor(w), client).execute(claimed)
-    finally:
-        await client.close()
+    assert w.queue.claim("test-worker") is None
     with w.db.read() as conn:
-        row = conn.execute(select(s.jobs).where(s.jobs.c.id == job["id"])).mappings().one()
-        attempt = conn.execute(select(s.job_attempts).where(s.job_attempts.c.job_id == job["id"])).mappings().one()
+        row = conn.execute(s.jobs.select().where(s.jobs.c.id == job["id"])).mappings().one()
+        attempts = conn.execute(s.job_attempts.select().where(s.job_attempts.c.job_id == job["id"])).all()
     assert row["state"] == "succeeded"
-    assert row["result_json"]["decision"]["action"] == "keep_observed"
-    assert attempt["tool_audit_json"] is None
+    assert row["result_json"]["status"] == "skipped"
+    assert attempts == []

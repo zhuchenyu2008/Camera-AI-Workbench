@@ -6,7 +6,6 @@ from sqlalchemy import select, update
 
 from app.activities.names import activity_name
 from app.analysis.client import PROMPT_VERSION, VISUAL_PROMPT, build_payload
-from app.analysis.minute_decision import needs_minute_decision
 from app.analysis.normalize import normalize
 from app.detection.motion import sparse_frames
 from app.errors import AppError
@@ -581,34 +580,6 @@ class Analysis:
                         minute_id=minute["id"],
                         minute_revision=revision,
                     )
-                )
-            # This is a text-only, optional review. It never supplies the
-            # duration; Ledger remains the sole authority for coverage and
-            # inference. Providers without tool support simply skip it.
-            settings = self.w.settings_config(conn)
-            decision_provider = one(
-                conn,
-                s.providers,
-                settings.summary_provider_id or payload["provider_id"],
-                deleted=True,
-            )
-            if needs_minute_decision(spans, review) and decision_provider["config_json"].get(
-                "tool_calling", False
-            ):
-                enqueue(
-                    conn,
-                    self.w.now(),
-                    "minute_decision",
-                    {
-                        "provider_id": decision_provider["id"],
-                        "provider_revision": decision_provider["revision"],
-                        "camera_id": minute["camera_id"],
-                        "minute_id": minute["id"],
-                        "minute_start": start,
-                    },
-                    f"minute-decision:{minute['id']}:{revision}",
-                    total=1,
-                    unit="step",
                 )
             self.w.assets.keep_evidence(conn, result["evidence_ids"], "minute", minute["id"], revision)
             can_replace = (

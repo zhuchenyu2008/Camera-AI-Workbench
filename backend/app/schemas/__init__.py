@@ -405,7 +405,6 @@ class ProviderWrite(Strict):
     output_token_parameter: Literal["max_completion_tokens", "max_tokens"] = "max_completion_tokens"
     response_format_mode: Literal["json_schema", "json_object", "prompt_json"] = "json_schema"
     detail_mode: Literal["auto", "low", "high", "omit"] = "auto"
-    tool_calling: bool = False
 
     @field_validator("api_key")
     @classmethod
