@@ -295,7 +295,14 @@ class Summaries:
     @staticmethod
     def fallback(statistics):
         c = statistics["coverage"]
-        return f"计划采集 {c['planned_ms'] // 1000} 秒，实际采集 {c['captured_ms'] // 1000} 秒，已分类 {c['classified_ms'] // 1000} 秒，有画面但暂无活动结论 {c['unanalysed_ms'] // 1000} 秒，采集缺口 {c['gap_ms'] // 1000} 秒。活动时长为估计值。"
+        analysis_parts = [
+            f"分析处理中 {c.get('unanalysed_pending_ms', 0) // 1000} 秒",
+            f"分析失败 {c.get('unanalysed_failed_ms', 0) // 1000} 秒",
+            f"现场图过期 {c.get('unanalysed_expired_ms', 0) // 1000} 秒",
+        ]
+        if not c.get("unanalysed_ms"):
+            analysis_parts = ["分析结果缺口 0 秒"]
+        return f"计划采集 {c['planned_ms'] // 1000} 秒，实际采集 {c['captured_ms'] // 1000} 秒，已分类 {c['classified_ms'] // 1000} 秒，{ '、'.join(analysis_parts) }，采集缺口 {c['gap_ms'] // 1000} 秒。活动时长为估计值。"
 
     def get(self, conn, summary_id, revision=None):
         summary = one(conn, s.summaries, summary_id)

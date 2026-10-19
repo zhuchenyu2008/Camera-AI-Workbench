@@ -86,6 +86,22 @@ def test_B07_expired_analysis_not_away_and_identity_uncertain(w):
     assert statistics(w, start + 60000, start + 120000, [camera])["coverage"]["unknown_ms"] == 60000
 
 
+def test_B07_stale_pending_reason_on_complete_minute_is_not_unanalysed(w):
+    camera = make_camera(w)
+    start = w.now()
+    minute = make_minute(w, camera, start, activity="reading", subject="me")
+    with w.db.write() as conn:
+        conn.execute(
+            update(s.minute_revisions)
+            .where(s.minute_revisions.c.minute_id == minute)
+            .values(result_json={"analysis_state": "complete", "unanalysed_reason": "pending"})
+        )
+    result = statistics(w, start, start + 60000, [camera])
+    assert result["coverage"]["classified_ms"] == 60000
+    assert result["coverage"]["unanalysed_ms"] == 0
+    assert result["coverage"]["unanalysed_pending_ms"] == 0
+
+
 def test_B01_schedule_revision_does_not_rewrite_history(w, clock):
     camera = make_camera(w)
     start = w.now()

@@ -275,10 +275,11 @@ class Ledger:
                         for camera in cameras
                         if camera in active_minutes
                     ]
+                    blocking_reasons = [reason for reason in reasons if reason not in {None, "pending"}]
                     if (
                         statuses
                         and all(state in {"complete", "partial"} for state in statuses)
-                        and not any(reasons)
+                        and not blocking_reasons
                     ):
                         category = "unknown"
                     else:

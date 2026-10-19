@@ -198,6 +198,13 @@ def test_activity_catalog_is_sent_to_visual_model_and_reused(w, clock, jpeg):
         assert one(conn, s.jobs, root["id"])["state"] == "succeeded"
         current = w.ledger.spans(conn, [camera], start, start + 60_000)
         assert {span["activity"] for span in current} == {"开关门进出房间"}
+        minute_revision = conn.execute(
+            select(s.minute_revisions.c.result_json)
+            .where(s.minute_revisions.c.minute_id == current[0]["minute_id"])
+            .order_by(s.minute_revisions.c.revision.desc())
+            .limit(1)
+        ).scalar_one()
+        assert "unanalysed_reason" not in minute_revision
 
 
 def test_model_protocol_error_gets_only_one_retry(w):
@@ -281,6 +288,31 @@ async def test_B05_B06_dense_batches_reconcile_full_refs_and_usage(w, jpeg, cloc
         assert sum(r["reference_image_count"] for r in usage) == 3
         assert all(r["request_bytes"] > len(jpeg) * 20 for r in usage)
         assert len(list(conn.execute(select(s.evidence_refs)))) == 60
+
+
+def test_visual_batches_do_not_mix_minutes(w):
+    make_provider(w)
+    with w.db.read() as conn:
+        provider = conn.execute(select(s.providers)).mappings().one()
+        cfg = w.settings_config(conn)
+    frames = [
+        {
+            "id": f"ev_{index}",
+            "camera_id": "cam",
+            "captured_at_ms": minute + offset,
+            "slot_at_ms": minute + offset,
+            "bytes": 1,
+        }
+        for minute in (0, 60000)
+        for index, offset in enumerate((0, 20000, 40000, 59000))
+    ]
+
+    batches = Analysis(w).pack_frames(cfg, provider, {"members_json": []}, frames)
+
+    assert len(batches) == 2
+    assert [
+        {frame["slot_at_ms"] // 60000 * 60000 for frame in batch} for batch in batches
+    ] == [{0}, {60000}]
 
 
 async def test_B05_retry_after_and_provider_pause(w, jpeg, clock):

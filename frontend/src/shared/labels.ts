@@ -43,7 +43,7 @@ export function activityStyle(name: string): CSSProperties {
   } as CSSProperties;
 }
 export const analysisLabels: Record<string, string> = {
-  pending: "已采集，等待分析任务",
+  pending: "分析排队中",
   running: "分析进行中",
   complete: "分析完成",
   partial: "部分范围已分析",

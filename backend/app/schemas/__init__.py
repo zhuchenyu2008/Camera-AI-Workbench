@@ -873,7 +873,7 @@ class EntityCandidate(Strict):
 
 class VisualOutput(Strict):
     schema_version: Literal["1.0"]
-    minutes: Annotated[list[VisualMinute], Field(min_length=1, max_length=5)]
+    minutes: Annotated[list[VisualMinute], Field(max_length=5)]
     # 候选独立校验，坏候选不能导致有效的活动观察失败。
     entity_candidates: list[EntityCandidate] = Field(default_factory=list, max_length=100)
 

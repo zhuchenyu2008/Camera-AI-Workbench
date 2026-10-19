@@ -244,7 +244,14 @@ export function MinuteDetail() {
                   action={<Badge>{evidenceLabels[m.evidence_state]}</Badge>}
                 >
                   <p className="observation">
-                    {m.description || "有画面，但此段暂无活动结论。"}
+                    {m.description ||
+                      ({
+                        pending: "已采集画面，分析任务排队中。",
+                        running: "已采集画面，分析进行中。",
+                        failed: "分析失败，未生成有效结果。",
+                        expired: "分析未完成，现场图已过期。",
+                      } as Record<string, string>)[m.analysis_state] ||
+                      "已采集画面，尚未生成分析结果。"}
                   </p>
                   <CoverageTrack coverage={m.coverage} />
                   <dl className="definition-list">

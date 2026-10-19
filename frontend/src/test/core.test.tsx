@@ -477,7 +477,7 @@ describe("自由活动名称", () => {
 describe("分析状态文案", () => {
   it("按处理阶段区分分钟状态", () => {
     expect(analysisLabels).toMatchObject({
-      pending: "已采集，等待分析任务",
+      pending: "分析排队中",
       running: "分析进行中",
       partial: "部分范围已分析",
       failed: "分析失败",
@@ -501,8 +501,8 @@ describe("分析状态文案", () => {
         }}
       />,
     );
-    expect(screen.getByText("有画面，暂无活动结论")).toBeInTheDocument();
-    expect(screen.getByText("其中等待处理 1 分钟")).toBeInTheDocument();
+    expect(screen.getByText("分析结果缺口")).toBeInTheDocument();
+    expect(screen.getByText("其中分析处理中 1 分钟")).toBeInTheDocument();
     expect(screen.getByText("其中分析失败 2 分钟")).toBeInTheDocument();
     expect(
       screen.getByText("其中现场图已过期，未形成分析结果 3 分钟"),

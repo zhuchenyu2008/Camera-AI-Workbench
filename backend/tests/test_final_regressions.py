@@ -14,6 +14,7 @@ from app.repositories.db import new_id, one
 from app.services.analysis import Analysis
 from app.services.records import Records
 from app.summaries.service import Summaries
+from app.timeutils import timestamp
 from app.worker.cleanup import Cleaner
 from app.worker.executor import Executor
 from app.worker.queue import enqueue
@@ -121,7 +122,10 @@ async def test_B05_omitted_minute_fails_only_that_minute_and_sampling_is_honest(
         response = fake_visual(request, person)
         body = response.json()
         result = json.loads(body["choices"][0]["message"]["content"])
-        result["minutes"] = result["minutes"][:1]
+        if any(
+            timestamp(minute["minute_start"]) == second_start for minute in result["minutes"]
+        ):
+            result["minutes"] = []
         body["choices"][0]["message"]["content"] = json.dumps(result)
         return httpx.Response(200, json=body)
 

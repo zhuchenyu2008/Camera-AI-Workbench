@@ -163,9 +163,21 @@ export function Overview() {
                       </strong>
                     </div>
                     <div>
-                      <span>有画面，暂无活动结论</span>
+                      <span>分析处理中</span>
                       <strong>
-                        {duration(data.coverage.unanalysed_ms ?? 0, false)}
+                        {duration(data.coverage.unanalysed_pending_ms ?? 0, false)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>分析失败</span>
+                      <strong>
+                        {duration(data.coverage.unanalysed_failed_ms ?? 0, false)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>现场图已过期</span>
+                      <strong>
+                        {duration(data.coverage.unanalysed_expired_ms ?? 0, false)}
                       </strong>
                     </div>
                     <div>
@@ -184,7 +196,7 @@ export function Overview() {
       {cameraList.length > 0 &&
       !settings.data?.data.config.vision_provider_id ? (
         <Notice tone="warning">
-          摄像头可独立采集，但当前有画面暂无活动结论；配置 AI 服务后才能分析。
+          摄像头可独立采集，但尚未配置 AI 分析服务；配置后才会生成活动结论。
           <ScopeLink to="/settings/ai" className="text-link">
             配置 AI 服务
           </ScopeLink>
@@ -231,7 +243,7 @@ export function Overview() {
               ) : (
                 <EmptyState
                   title="此范围暂未形成活动事件"
-                  description="有画面但暂无活动结论的时间不会被当作没有活动，请查看上方时间覆盖。"
+                  description="分析结果缺口的时间不会被当作没有活动，请查看上方时间覆盖。"
                   action={
                     <ScopeLink to="/minutes" className="text-link">
                       查看分钟记录

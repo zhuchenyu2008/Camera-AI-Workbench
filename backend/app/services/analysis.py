@@ -240,7 +240,13 @@ class Analysis:
         if capacity < 1:
             raise AppError(422, "REFERENCE_CAPACITY_EXCEEDED", "完整参考集没有为现场图留下容量")
         batches, batch = [], []
+        batch_minute = None
         for frame in frames:
+            minute = frame["slot_at_ms"] // 60000 * 60000
+            if batch and minute != batch_minute:
+                batches.append(batch)
+                batch = []
+            batch_minute = minute
             candidate = batch + [frame]
             if (
                 len(candidate) > capacity
@@ -258,6 +264,7 @@ class Analysis:
                     > limits["max_request_body_bytes"]
                 ):
                     raise AppError(422, "REFERENCE_CAPACITY_EXCEEDED", "单图与完整参考集超过请求体上限")
+                batch_minute = minute
             else:
                 batch = candidate
         if batch:
@@ -526,6 +533,9 @@ class Analysis:
                 ).scalar()
                 or 0
             ) + 1
+            unanalysed_reason = (
+                "expired" if local_expired else "failed" if local_failed or not has_result else None
+            )
             result = dict(
                 visual_outputs=(existing.get("visual_outputs", []) if preserved else []) + local_outputs,
                 activity_catalog=payload.get("activity_catalog", []),
@@ -541,11 +551,6 @@ class Analysis:
                     {f["id"] for f in local_metas} | {e for span in spans for e in span["evidence_ids_json"]}
                 ),
                 has_manual_revision=False,
-                unanalysed_reason="expired"
-                if local_expired
-                else "failed"
-                if local_failed or not has_result
-                else "pending",
                 run_created_at=payload["run_created_at"],
                 sampling={
                     "target_frame_count": 60
@@ -564,6 +569,8 @@ class Analysis:
                     "successful_frame_count": len(local_metas),
                 },
             )
+            if unanalysed_reason:
+                result["unanalysed_reason"] = unanalysed_reason
             for key in ("manual_subject_id", "manual_object_assignments"):
                 if key in existing:
                     result[key] = existing[key]
