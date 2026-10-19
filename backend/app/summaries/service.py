@@ -295,7 +295,7 @@ class Summaries:
     @staticmethod
     def fallback(statistics):
         c = statistics["coverage"]
-        return f"计划采集 {c['planned_ms'] // 1000} 秒，实际采集 {c['captured_ms'] // 1000} 秒，已分类 {c['classified_ms'] // 1000} 秒，尚未分析 {c['unanalysed_ms'] // 1000} 秒，采集缺口 {c['gap_ms'] // 1000} 秒。活动时长为估计值。"
+        return f"计划采集 {c['planned_ms'] // 1000} 秒，实际采集 {c['captured_ms'] // 1000} 秒，已分类 {c['classified_ms'] // 1000} 秒，已采集但尚无分析结果 {c['unanalysed_ms'] // 1000} 秒，采集缺口 {c['gap_ms'] // 1000} 秒。活动时长为估计值。"
 
     def get(self, conn, summary_id, revision=None):
         summary = one(conn, s.summaries, summary_id)

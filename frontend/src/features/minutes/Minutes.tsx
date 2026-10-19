@@ -214,7 +214,7 @@ export function MinuteDetail() {
           <>
             <PageHeading
               title={`${clock(m.start_at)} 的分钟记录`}
-              description={`${analysisLabels[m.analysis_state]} · ${m.analysis_mode ? modeLabels[m.analysis_mode] : "尚无分析模式"} · 北京时间`}
+              description={`${analysisLabels[m.analysis_state]} · ${m.analysis_mode ? modeLabels[m.analysis_mode] : "分析方式尚未生成"} · 北京时间`}
               action={
                 m.revision > 0 ? (
                   <RevisionPicker
@@ -244,7 +244,7 @@ export function MinuteDetail() {
                   action={<Badge>{evidenceLabels[m.evidence_state]}</Badge>}
                 >
                   <p className="observation">
-                    {m.description || "有画面，但此段尚未完成分析。"}
+                    {m.description || "已采集画面，但此段尚无分析结果。"}
                   </p>
                   <CoverageTrack coverage={m.coverage} />
                   <dl className="definition-list">

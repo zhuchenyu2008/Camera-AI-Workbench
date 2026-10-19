@@ -163,7 +163,7 @@ export function Overview() {
                       </strong>
                     </div>
                     <div>
-                      <span>等待分析</span>
+                      <span>已采集但尚无分析结果</span>
                       <strong>
                         {duration(data.coverage.unanalysed_ms ?? 0, false)}
                       </strong>
@@ -184,7 +184,7 @@ export function Overview() {
       {cameraList.length > 0 &&
       !settings.data?.data.config.vision_provider_id ? (
         <Notice tone="warning">
-          摄像头可独立采集，AI 服务尚未配置；有画面的范围将等待分析。
+          摄像头可独立采集，但已采集画面暂未生成分析结果；配置 AI 服务后才能分析。
           <ScopeLink to="/settings/ai" className="text-link">
             配置 AI 服务
           </ScopeLink>
@@ -230,8 +230,8 @@ export function Overview() {
                 <EventList events={data.latest_events} limit={10} />
               ) : (
                 <EmptyState
-                  title="此范围尚无活动事件"
-                  description="已采集的画面可能仍在等待分析；请查看上方时间覆盖。"
+                  title="此范围暂未形成活动事件"
+                  description="已采集但尚无分析结果的时间不会被当作没有活动，请查看上方时间覆盖。"
                   action={
                     <ScopeLink to="/minutes" className="text-link">
                       查看分钟记录

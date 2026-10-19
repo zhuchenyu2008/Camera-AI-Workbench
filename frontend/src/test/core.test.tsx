@@ -28,7 +28,9 @@ import {
   Field,
   ErrorNotice,
   ActivityChart,
+  CoverageTrack,
 } from "../shared/components";
+import { analysisLabels } from "../shared/labels";
 import {
   tokenText,
   costText,
@@ -469,5 +471,42 @@ describe("自由活动名称", () => {
     const bars = document.querySelectorAll<HTMLElement>(".activity-fill");
     expect(bars[0].style.getPropertyValue("--activity")).toBeTruthy();
     expect(bars[0].style.width).toBe("100%");
+  });
+});
+
+describe("分析状态文案", () => {
+  it("按处理阶段区分分钟状态", () => {
+    expect(analysisLabels).toMatchObject({
+      pending: "已采集，等待分析任务",
+      running: "分析进行中",
+      partial: "部分范围已分析",
+      failed: "分析失败",
+      expired: "未完成分析，现场图已过期",
+    });
+  });
+
+  it("覆盖统计说明聚合状态及未完成原因", () => {
+    render(
+      <CoverageTrack
+        coverage={{
+          planned_ms: 600000,
+          captured_ms: 600000,
+          classified_ms: 120000,
+          unknown_ms: 60000,
+          unanalysed_ms: 360000,
+          unanalysed_pending_ms: 60000,
+          unanalysed_failed_ms: 120000,
+          unanalysed_expired_ms: 180000,
+          gap_ms: 60000,
+        }}
+      />,
+    );
+    expect(screen.getByText("已采集但尚无分析结果")).toBeInTheDocument();
+    expect(screen.getByText("其中等待处理 1 分钟")).toBeInTheDocument();
+    expect(screen.getByText("其中分析失败 2 分钟")).toBeInTheDocument();
+    expect(
+      screen.getByText("其中现场图已过期，未形成分析结果 3 分钟"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("待分析")).not.toBeInTheDocument();
   });
 });

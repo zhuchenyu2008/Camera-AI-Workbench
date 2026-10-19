@@ -627,7 +627,7 @@ export function ScopePicker({
 const coverageTypes = [
   ["classified_ms", "已归类", "classified"],
   ["unknown_ms", "无法判断", "unknown"],
-  ["unanalysed_ms", "有画面待分析", "pending"],
+  ["unanalysed_ms", "已采集但尚无分析结果", "pending"],
   ["gap_ms", "采集缺口", "gap"],
 ] as const;
 export function CoverageTrack({
@@ -678,6 +678,11 @@ export function CoverageTrack({
           {total !== sum ? " · 统计正在更新，请刷新查看" : ""}
         </p>
       )}
+      {(coverage.unanalysed_pending_ms ?? 0) > 0 && (
+        <p className="caption">
+          其中等待处理 {duration(coverage.unanalysed_pending_ms, false)}
+        </p>
+      )}
       {(coverage.unanalysed_failed_ms ?? 0) > 0 && (
         <p className="caption">
           其中分析失败 {duration(coverage.unanalysed_failed_ms, false)}
@@ -685,7 +690,7 @@ export function CoverageTrack({
       )}
       {(coverage.unanalysed_expired_ms ?? 0) > 0 && (
         <p className="caption">
-          其中尚未分析且原图已过期{" "}
+          其中现场图已过期，未形成分析结果{" "}
           {duration(coverage.unanalysed_expired_ms, false)}
         </p>
       )}
@@ -718,7 +723,7 @@ export function ActivityChart({ items }: { items: ActivityDuration[] }) {
           </div>
         ))
       ) : (
-        <p className="muted">尚无已归类活动，已采集范围可能仍在等待分析。</p>
+        <p className="muted">尚无已归类活动；已采集范围可能尚无分析结果。</p>
       )}
     </div>
   );

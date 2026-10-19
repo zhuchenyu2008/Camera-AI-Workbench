@@ -226,7 +226,7 @@ export function ReportDetail() {
                     ? "文字生成失败，确定性统计仍然保留。"
                     : s.summary_state === "provisional"
                       ? "部分分钟仍在分析，来源更新后会重新汇总。"
-                      : "范围中存在断流、未分析或无法判断时间，请结合覆盖明细阅读。"}
+                      : "范围中存在断流、已采集但尚无分析结果或无法判断的时间，请结合覆盖明细阅读。"}
               </Notice>
             ) : null}
             <div className="detail-columns">
