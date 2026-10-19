@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Plus, UserRound } from "lucide-react";
+import { Plus, UserRound } from "lucide-react";
 import { api } from "../../api/client";
 import { invalidate, useApi } from "../../api/query";
 import { useAction } from "../../shared/hooks";
@@ -25,12 +25,11 @@ export function Entities() {
     navigate = useNavigate(),
     [adding, setAdding] = useState(false),
     [name, setName] = useState(""),
-    [kind, setKind] = useState<"person" | "object">("person"),
     action = useAction<unknown>();
   const filter = scope.search.get("kind");
   const q = useApi("listEntities", {
     query: {
-      kind: filter === "person" || filter === "object" ? filter : undefined,
+      kind: filter === "person" ? filter : undefined,
       limit: 50,
       cursor: scope.search.get("cursor"),
     },
@@ -38,9 +37,9 @@ export function Entities() {
   return (
     <>
       <PageHeading
-        kicker="REFERENCE / PEOPLE & OBJECTS"
-        title="人物与物品"
-        description="长期参考资料独立保存，不随现场图到期。"
+        kicker="REFERENCE / PEOPLE"
+        title="人物档案"
+        description="人物参考图独立保存，不随现场图到期。"
         action={
           <Button variant="primary" onClick={() => setAdding(true)}>
             <Plus size={17} />
@@ -51,18 +50,7 @@ export function Entities() {
       <Panel
         title="参考档案"
         action={
-          <label className="inline-field">
-            类型
-            <select
-              aria-label="档案类型筛选"
-              value={filter ?? ""}
-              onChange={(e) => scope.update("kind", e.target.value)}
-            >
-              <option value="">全部类型</option>
-              <option value="person">人物</option>
-              <option value="object">物品</option>
-            </select>
-          </label>
+          <span className="caption muted">仅包含人物</span>
         }
       >
         <QueryState query={q}>
@@ -82,10 +70,8 @@ export function Entities() {
                             url={e.references[0].content_url}
                             alt={e.name}
                           />
-                        ) : e.kind === "person" ? (
-                          <UserRound size={25} />
                         ) : (
-                          <Box size={25} />
+                          <UserRound size={25} />
                         )}
                       </span>
                       <div>
@@ -98,7 +84,7 @@ export function Entities() {
                           <Badge>{e.enabled ? "已启用" : "未启用草稿"}</Badge>
                         </div>
                         <p className="caption muted">
-                          {e.kind === "person" ? "人物" : "物品"} ·{" "}
+                          人物 ·{" "}
                           {e.camera_ids.length
                             ? `${e.camera_ids.length} 台机位`
                             : "所有机位"}{" "}
@@ -113,7 +99,7 @@ export function Entities() {
               ) : (
                 <EmptyState
                   title="尚无参考档案"
-                  description="开启自动建档后，画面分析会生成人物和相关物品；也可以手动添加参考资料。"
+                  description="开启自动建档后，画面分析会生成可辨认的人物；也可以手动添加人物参考资料。"
                 />
               )}
               <Pager hasMore={page.has_more} nextCursor={page.next_cursor} />
@@ -125,16 +111,16 @@ export function Entities() {
         参考资料只辅助识别与命名，系统按相关性选取代表图。没有档案也能正常记录活动。
       </Notice>
       {adding && (
-        <Modal title="添加人物或物品" onClose={() => setAdding(false)}>
+        <Modal title="添加人物" onClose={() => setAdding(false)}>
           <form
             className="stack"
             onSubmit={(e) => {
               e.preventDefault();
-              void action.run([name, kind], async (key) => {
+              void action.run([name], async (key) => {
                 const r = await api("createEntity", {
                   body: {
                     name,
-                    kind,
+                    kind: "person",
                     enabled: false,
                     is_primary_subject: false,
                   },
@@ -154,15 +140,6 @@ export function Entities() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
-            </Field>
-            <Field label="类型">
-              <select
-                value={kind}
-                onChange={(e) => setKind(e.target.value as typeof kind)}
-              >
-                <option value="person">人物</option>
-                <option value="object">物品</option>
-              </select>
             </Field>
             <Notice>
               可选地上传参考图帮助识别；无须建立主人物，也不要求多角度照片。

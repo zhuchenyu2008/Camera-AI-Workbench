@@ -32,6 +32,7 @@
         "unanalysed_ms": 0,
         "gap_ms": 600000,
         "conflict_ms": 0,
+        "inferred_ms": 0,
         "unanalysed_pending_ms": 0,
         "unanalysed_failed_ms": 0,
         "unanalysed_expired_ms": 0
@@ -39,15 +40,18 @@
       "activities": [
         {
           "activity": "reading",
-          "duration_ms": 1200000
+          "duration_ms": 1200000,
+          "estimated_ms": 0
         },
         {
           "activity": "resting",
-          "duration_ms": 300000
+          "duration_ms": 300000,
+          "estimated_ms": 0
         },
         {
           "activity": "writing",
-          "duration_ms": 1500000
+          "duration_ms": 1500000,
+          "estimated_ms": 0
         }
       ],
       "duration_is_estimated": true,

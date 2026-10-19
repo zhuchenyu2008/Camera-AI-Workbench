@@ -344,7 +344,7 @@ export function MinuteDetail() {
                           </div>
                           <p className="observation">{s.observation}</p>
                           <Badge>
-                            {s.origin === "manual" ? "人工修订" : "AI 观察"} ·{" "}
+                            {s.origin === "manual" ? "人工修订" : s.inferred ? "按前后证据估算" : "AI 观察"} ·{" "}
                             {modeLabels[s.support]}
                           </Badge>
                         </div>

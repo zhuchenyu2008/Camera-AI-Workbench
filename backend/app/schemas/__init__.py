@@ -316,7 +316,7 @@ class Crop(Strict):
 
 class EntityCreate(Strict):
     name: Name
-    kind: Literal["person", "object"]
+    kind: Literal["person"] = "person"
     description: Annotated[str, Field(max_length=1000)] = ""
     camera_ids: Annotated[list[str], Field(max_length=32)] = []
     enabled: bool = False
@@ -376,7 +376,7 @@ class ReferenceDto(Strict):
 class EntityDto(Strict):
     id: str
     revision: int
-    kind: Literal["person", "object"]
+    kind: Literal["person"]
     name: str
     description: str
     enabled: bool
@@ -405,6 +405,7 @@ class ProviderWrite(Strict):
     output_token_parameter: Literal["max_completion_tokens", "max_tokens"] = "max_completion_tokens"
     response_format_mode: Literal["json_schema", "json_object", "prompt_json"] = "json_schema"
     detail_mode: Literal["auto", "low", "high", "omit"] = "auto"
+    tool_calling: bool = False
 
     @field_validator("api_key")
     @classmethod
@@ -690,6 +691,7 @@ class Coverage(Strict):
     unanalysed_ms: int = 0
     gap_ms: int = 0
     conflict_ms: int = 0
+    inferred_ms: int = 0
     unanalysed_pending_ms: int = 0
     unanalysed_failed_ms: int = 0
     unanalysed_expired_ms: int = 0
@@ -698,6 +700,7 @@ class Coverage(Strict):
 class ActivityDuration(Strict):
     activity: Activity
     duration_ms: int
+    estimated_ms: int = 0
 
 
 class Progress(Strict):
@@ -768,6 +771,7 @@ class SegmentDto(Strict):
     evidence_ids: list[str]
     origin: Literal["ai", "manual"]
     support: Literal["sparse", "dense", "mixed"]
+    inferred: bool = False
 
 
 class MinuteDto(Strict):
@@ -863,7 +867,7 @@ class VisualMinute(Strict):
 
 class EntityCandidate(Strict):
     key: Annotated[str, Field(min_length=1, max_length=100)]
-    kind: Literal["person", "object"]
+    kind: Literal["person"]
     name: Name
     description: Annotated[str, Field(max_length=1000)] = ""
     evidence_id: str

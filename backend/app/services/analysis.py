@@ -6,6 +6,7 @@ from sqlalchemy import select, update
 
 from app.activities.names import activity_name
 from app.analysis.client import PROMPT_VERSION, VISUAL_PROMPT, build_payload
+from app.analysis.minute_decision import needs_minute_decision
 from app.analysis.normalize import normalize
 from app.detection.motion import sparse_frames
 from app.errors import AppError
@@ -463,17 +464,8 @@ class Analysis:
                 )
                 if candidate:
                     span["subject_id"], span["identity_status"] = candidate["entity_id"], "matched"
-                object_keys = details.get("object_candidate_keys", [])
-                if object_keys:
-                    ids = list(
-                        conn.execute(
-                            select(s.discovery_candidates.c.entity_id).where(
-                                s.discovery_candidates.c.id.in_(object_keys),
-                                s.discovery_candidates.c.state == "archived",
-                            )
-                        ).scalars()
-                    )
-                    details["object_ids"] = sorted(set(details["object_ids"]) | set(ids))
+                details["object_ids"] = []
+                details["object_candidate_keys"] = []
             previous = (
                 conn.execute(
                     select(s.minute_revisions).where(
@@ -493,13 +485,8 @@ class Analysis:
                     span["subject_id"], span["identity_status"] = existing["manual_subject_id"], "matched"
                 if span["subject_id"]:
                     span["subject_id"] = resolver.resolve(conn, span["subject_id"])
-                mapping = existing.get("manual_object_assignments", {})
-                span["details_json"]["object_ids"] = sorted(
-                    {
-                        resolver.resolve(conn, mapping.get(e, e))
-                        for e in span["details_json"].get("object_ids", [])
-                    }
-                )
+                span["details_json"]["object_ids"] = []
+                span["details_json"]["object_candidate_keys"] = []
             preserved = False
             # 部分重分析只替换新结果实际支持的区间，保留窗口外已经有效的观察。
             if not existing.get("has_manual_revision"):
@@ -571,7 +558,7 @@ class Analysis:
             )
             if unanalysed_reason:
                 result["unanalysed_reason"] = unanalysed_reason
-            for key in ("manual_subject_id", "manual_object_assignments"):
+            for key in ("manual_subject_id",):
                 if key in existing:
                     result[key] = existing[key]
             conn.execute(
@@ -594,6 +581,34 @@ class Analysis:
                         minute_id=minute["id"],
                         minute_revision=revision,
                     )
+                )
+            # This is a text-only, optional review. It never supplies the
+            # duration; Ledger remains the sole authority for coverage and
+            # inference. Providers without tool support simply skip it.
+            settings = self.w.settings_config(conn)
+            decision_provider = one(
+                conn,
+                s.providers,
+                settings.summary_provider_id or payload["provider_id"],
+                deleted=True,
+            )
+            if needs_minute_decision(spans, review) and decision_provider["config_json"].get(
+                "tool_calling", False
+            ):
+                enqueue(
+                    conn,
+                    self.w.now(),
+                    "minute_decision",
+                    {
+                        "provider_id": decision_provider["id"],
+                        "provider_revision": decision_provider["revision"],
+                        "camera_id": minute["camera_id"],
+                        "minute_id": minute["id"],
+                        "minute_start": start,
+                    },
+                    f"minute-decision:{minute['id']}:{revision}",
+                    total=1,
+                    unit="step",
                 )
             self.w.assets.keep_evidence(conn, result["evidence_ids"], "minute", minute["id"], revision)
             can_replace = (

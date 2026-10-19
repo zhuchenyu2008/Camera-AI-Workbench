@@ -38,7 +38,6 @@ function editableIntervals(event: EventDto): CorrectionInterval[] {
         subject_id: s.subject_id,
         activity: s.activity,
         labels: s.labels,
-        object_ids: s.object_ids,
         start_at: s.start_at,
         end_at: s.end_at,
       }))
@@ -47,7 +46,6 @@ function editableIntervals(event: EventDto): CorrectionInterval[] {
           subject_id: event.subject_id,
           activity: event.activity,
           labels: event.labels,
-          object_ids: event.object_ids,
           start_at: event.start_at,
           end_at: event.end_at,
         },
@@ -60,8 +58,7 @@ function editableIntervals(event: EventDto): CorrectionInterval[] {
       prev.end_at === s.start_at &&
       prev.subject_id === s.subject_id &&
       prev.activity === s.activity &&
-      JSON.stringify(prev.labels) === JSON.stringify(s.labels) &&
-      JSON.stringify(prev.object_ids) === JSON.stringify(s.object_ids)
+      JSON.stringify(prev.labels) === JSON.stringify(s.labels)
     )
       prev.end_at = s.end_at;
     else merged.push({ ...s });
@@ -319,7 +316,6 @@ function CorrectionEditor({
   const entities = useAllApi("listEntities"),
     settings = useApi("getSettings");
   const allEntities = entities.data ?? [];
-  const allObjects = allEntities.filter((x) => x.kind === "object");
   const [intervals, setIntervals] = useState<CorrectionInterval[]>(() =>
     editableIntervals(event),
   );
@@ -330,18 +326,7 @@ function CorrectionEditor({
   const action = useAction<EventUpdateDto>();
   const change = (i: number, patch: Partial<CorrectionInterval>) =>
     setIntervals((v) => v.map((r, n) => (n === i ? { ...r, ...patch } : r)));
-  const hasPersonAsObject = intervals.some((r) =>
-    (r.object_ids ?? []).some((objId) => {
-      const ent = allEntities.find((x) => x.id === objId);
-      return ent && ent.kind !== "object";
-    }),
-  );
-  const tooManyObjects = intervals.some(
-    (r) => (r.object_ids?.length ?? 0) > 32,
-  );
   const valid =
-    !hasPersonAsObject &&
-    !tooManyObjects &&
     intervals.length > 0 &&
     intervals.every(
       (r, i) =>
@@ -417,13 +402,11 @@ function CorrectionEditor({
                         ...v.slice(0, i),
                         {
                           ...r,
-                          object_ids: [...(r.object_ids ?? [])],
                           labels: [...(r.labels ?? [])],
                           end_at: new Date(half).toISOString(),
                         },
                         {
                           ...r,
-                          object_ids: [...(r.object_ids ?? [])],
                           labels: [...(r.labels ?? [])],
                           start_at: new Date(half).toISOString(),
                         },
@@ -549,120 +532,9 @@ function CorrectionEditor({
                   </label>
                 ))}
               </div>
-              <div style={{ marginTop: 12 }}>
-                <div
-                  className="row-between"
-                  style={{ alignItems: "center", marginBottom: 6 }}
-                >
-                  <span className="caption">
-                    <strong>关联物品</strong>（最多 32 个，已选{" "}
-                    {(r.object_ids ?? []).length} 个）
-                  </span>
-                  {(r.object_ids ?? []).length > 0 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => change(i, { object_ids: [] })}
-                    >
-                      清空物品
-                    </Button>
-                  )}
-                </div>
-                {(r.object_ids ?? []).length > 0 && (
-                  <div className="row-wrap" style={{ gap: 6, marginBottom: 8 }}>
-                    {(r.object_ids ?? []).map((objId) => {
-                      const found = allEntities.find((x) => x.id === objId);
-                      const displayName = found ? found.name : objId;
-                      const isInactive = found && !found.enabled;
-                      return (
-                        <span
-                          key={objId}
-                          className="badge"
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 4,
-                          }}
-                        >
-                          {displayName}
-                          {isInactive && (
-                            <small className="muted">（已停用）</small>
-                          )}
-                          {!found && (
-                            <small className="muted">（已删除）</small>
-                          )}
-                          <button
-                            type="button"
-                            aria-label={`移除物品 ${displayName}`}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                              padding: "0 2px",
-                              lineHeight: 1,
-                            }}
-                            onClick={() =>
-                              change(i, {
-                                object_ids: (r.object_ids ?? []).filter(
-                                  (id) => id !== objId,
-                                ),
-                              })
-                            }
-                          >
-                            ×
-                          </button>
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-                <div className="row-wrap" style={{ gap: 8 }}>
-                  <select
-                    aria-label={`片段 ${i + 1} 添加物品`}
-                    value=""
-                    disabled={(r.object_ids ?? []).length >= 32}
-                    onChange={(e) => {
-                      const selectedId = e.target.value;
-                      if (!selectedId) return;
-                      const targetEntity = allEntities.find(
-                        (x) => x.id === selectedId,
-                      );
-                      if (targetEntity && targetEntity.kind !== "object")
-                        return;
-                      const current = r.object_ids ?? [];
-                      if (
-                        current.length < 32 &&
-                        !current.includes(selectedId)
-                      ) {
-                        change(i, { object_ids: [...current, selectedId] });
-                      }
-                    }}
-                  >
-                    <option value="">
-                      {(r.object_ids ?? []).length >= 32
-                        ? "已达上限 32 个"
-                        : "添加关联物品..."}
-                    </option>
-                    {allObjects
-                      .filter((o) => !(r.object_ids ?? []).includes(o.id))
-                      .map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.name}
-                          {!o.enabled ? "（已停用）" : ""}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              </div>
             </div>
           ))}
-          {hasPersonAsObject && (
-            <Notice tone="danger">人物档案不能作为关联物品提交。</Notice>
-          )}
-          {tooManyObjects && (
-            <Notice tone="danger">单个片段关联物品不得超过 32 个。</Notice>
-          )}
-          {!valid && !hasPersonAsObject && !tooManyObjects && (
+          {!valid && (
             <Notice tone="danger">
               片段须按时间排序、不重叠，且位于原事件边界内。不能增加未经画面支持的计时。
             </Notice>

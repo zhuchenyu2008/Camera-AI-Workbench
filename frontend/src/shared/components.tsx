@@ -694,6 +694,11 @@ export function CoverageTrack({
           {duration(coverage.unanalysed_expired_ms, false)}
         </p>
       )}
+      {(coverage.inferred_ms ?? 0) > 0 && (
+        <p className="caption">
+          活动推断覆盖 {duration(coverage.inferred_ms, false)}；该时长不增加实际采集量
+        </p>
+      )}
     </div>
   );
 }
@@ -709,7 +714,10 @@ export function ActivityChart({ items }: { items: ActivityDuration[] }) {
                 <i className="activity-dot" style={activityStyle(a.activity)} />
                 {activityLabel(a.activity)}
               </span>
-              <strong>{duration(a.duration_ms)}</strong>
+              <strong>
+                {duration(a.duration_ms)}
+                {a.estimated_ms ? `（其中 ${duration(a.estimated_ms)} 为估算）` : ""}
+              </strong>
             </div>
             <div className="activity-rail">
               <div

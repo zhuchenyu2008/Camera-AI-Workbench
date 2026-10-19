@@ -238,7 +238,7 @@ export function EvidenceViewer({
                     );
                   }}
                 >
-                  <Field label="保存到人物 / 物品">
+                  <Field label="保存到人物">
                     <select
                       required
                       value={entity}

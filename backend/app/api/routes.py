@@ -814,7 +814,7 @@ def regenerate(request: Request, dto: RegenerateSummary):
 @router.get("/api/entities", operation_id="listEntities", response_model=ListEnvelope[EntityDto])
 def entities(
     request: Request,
-    kind: Literal["person", "object"] | None = None,
+    kind: Literal["person"] | None = None,
     enabled: bool | None = None,
     camera_id: str | None = None,
     limit: Limit = 50,

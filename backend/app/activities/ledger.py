@@ -35,6 +35,7 @@ def segment_dto(row: dict) -> dict:
         evidence_ids=row.get("evidence_ids_json", []),
         origin=row["origin"],
         support=row["support"],
+        inferred=details.get("inference_mode") == "edge_estimated",
     )
 
 
@@ -201,7 +202,7 @@ class Ledger:
         points = sorted(changes)
         p, c, active, active_minutes = set(), set(), {}, {}
         coverage = Coverage().model_dump()
-        activities = defaultdict(int)
+        activities = defaultdict(lambda: {"duration_ms": 0, "estimated_ms": 0})
         slices = []
         subject = scope["subject_id"]
         for i, a in enumerate(points[:-1]):
@@ -304,7 +305,28 @@ class Ledger:
             if conflict:
                 coverage["conflict_ms"] += duration
             if activity:
-                activities[activity] += duration
+                activities[activity]["duration_ms"] += duration
+            inferred_rows = [
+                row
+                for row in active.values()
+                if row["camera_id"] in p
+                and row.get("details_json", {}).get("inference_mode") == "edge_estimated"
+                and (subject is None or (row["subject_id"] == subject and row["identity_status"] == "matched"))
+            ]
+            inferred_keys = {
+                (
+                    row["subject_id"],
+                    row["identity_status"],
+                    row.get("details_json", {}).get("subject_candidate_key"),
+                    row["activity"],
+                )
+                for row in inferred_rows
+            }
+            if category == "gap" and len(inferred_keys) == 1:
+                inferred_activity = next(iter(inferred_keys))[3]
+                coverage["inferred_ms"] += duration
+                activities[inferred_activity]["duration_ms"] += duration
+                activities[inferred_activity]["estimated_ms"] += duration
             slices.append(
                 {"start": a, "end": b, "kind": category, "activity": activity, "conflict": conflict}
             )
@@ -315,10 +337,18 @@ class Ledger:
             + coverage["gap_ms"]
             == coverage["planned_ms"]
         )
-        assert sum(activities.values()) == coverage["classified_ms"]
+        assert sum(
+            value["duration_ms"] - value["estimated_ms"] for value in activities.values()
+        ) == coverage["classified_ms"]
+        activity_items = []
+        for name, value in sorted(activities.items()):
+            item = {"activity": name, "duration_ms": value["duration_ms"]}
+            if value["estimated_ms"]:
+                item["estimated_ms"] = value["estimated_ms"]
+            activity_items.append(item)
         return dict(
             coverage=coverage,
-            activities=[{"activity": a, "duration_ms": d} for a, d in sorted(activities.items())],
+            activities=activity_items,
             duration_is_estimated=True,
             projection_revision=data["revision"],
             slices=slices,
@@ -693,9 +723,8 @@ class Ledger:
                 entity = one(conn, s.entities, interval.subject_id, deleted=True)
                 if entity["kind"] != "person":
                     raise AppError(422, "VALIDATION_ERROR", "主体必须是人物")
-            for obj in interval.object_ids:
-                if one(conn, s.entities, obj, deleted=True)["kind"] != "object":
-                    raise AppError(422, "VALIDATION_ERROR", "object_ids 必须为物品")
+            if interval.object_ids:
+                raise AppError(422, "OBJECT_REFERENCES_DISABLED", "物品参考档案和活动关联已停用")
         correction_id = new_id("correction")
         conn.execute(
             update(s.manual_corrections)
@@ -838,7 +867,7 @@ class Ledger:
                             evidence_ids_json=evidence_ids,
                             details_json={
                                 "labels": matching.labels if matching else [],
-                                "object_ids": matching.object_ids if matching else [],
+                                "object_ids": [],
                                 "observation": dto.reason,
                             },
                         )

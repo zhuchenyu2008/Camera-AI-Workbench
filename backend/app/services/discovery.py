@@ -40,6 +40,8 @@ class Discovery:
                 candidate = EntityCandidate.model_validate(raw)
             except (ValidationError, TypeError):
                 continue
+            if candidate.kind != "person":
+                continue
             if candidate.evidence_id not in evidence or candidate.key in keys:
                 continue
             key = "candidate_" + fingerprint([job["id"], candidate.key])[:32]
@@ -55,9 +57,9 @@ class Discovery:
                 observation.subject_candidate_key = (
                     keys.get(original) if kinds.get(original) == "person" else None
                 )
-                observation.object_candidate_keys = [
-                    keys[k] for k in observation.object_candidate_keys if kinds.get(k) == "object"
-                ]
+                # 兼容旧模型字段，但新流程永远不建立物品身份。
+                observation.object_candidate_keys = []
+                observation.object_ids = []
         output.entity_candidates = candidates
 
     def stage(self, job, output, frames):
@@ -169,6 +171,8 @@ class Discovery:
         return None
 
     def new_entity(self, conn, candidate):
+        if candidate.get("kind") != "person":
+            raise AppError(422, "VALIDATION_ERROR", "只允许建立人物档案")
         resource_id = new_id("entity")
         name = candidate["name"]
         if candidate["kind"] == "person":
@@ -240,6 +244,26 @@ class Discovery:
 
     def archive(self, conn, pending, groups):
         pending = [r for r in pending if one(conn, s.discovery_candidates, r["id"])["state"] == "pending"]
+        if not pending:
+            return set()
+        # Legacy callers may still submit an object candidate. It is discarded
+        # at the boundary and can never become an entity or a reference asset.
+        object_rows = [r for r in pending if r["candidate_json"].get("kind") != "person"]
+        for row in object_rows:
+            conn.execute(
+                update(s.discovery_candidates)
+                .where(s.discovery_candidates.c.id == row["id"])
+                .values(state="discarded")
+            )
+        pending = [r for r in pending if r["candidate_json"].get("kind") == "person"]
+        groups = [
+            group
+            for group in groups
+            if all(
+                any(r["id"] == key for r in pending)
+                for key in group.get("candidate_keys", [])
+            )
+        ]
         if not pending:
             return set()
         by_id = {r["id"]: r for r in pending}

@@ -111,7 +111,7 @@ def test_scene_activity_does_not_require_identity(w):
     assert personal["coverage"]["unknown_ms"] == 60000
 
 
-def test_auto_archive_merges_same_person_and_object_candidates(w):
+def test_auto_archive_discards_legacy_object_candidates(w):
     camera = make_camera(w)
     service = Discovery(w)
     with w.db.write() as conn:
@@ -131,12 +131,14 @@ def test_auto_archive_merges_same_person_and_object_candidates(w):
         entities = list(conn.execute(select(s.entities)).mappings())
         occurrences = list(conn.execute(select(s.entity_occurrences)).mappings())
 
-    assert {row["kind"] for row in entities} == {"person", "object"}
-    assert len(entities) == 2
+    assert {row["kind"] for row in entities} == {"person"}
+    assert len(entities) == 1
     by_source = {row["source_key"]: row["entity_id"] for row in occurrences}
     assert by_source["person-a"] == by_source["person-b"]
-    assert by_source["object-a"] == by_source["object-b"]
-    assert by_source["person-a"] != by_source["object-a"]
+    with w.db.read() as conn:
+        assert conn.execute(
+            select(s.discovery_candidates.c.state).where(s.discovery_candidates.c.id == "object-a")
+        ).scalar_one() == "discarded"
 
 
 def test_auto_archive_uses_candidate_match_and_splits_conflicting_hints(w):
@@ -165,18 +167,20 @@ def test_auto_archive_uses_candidate_match_and_splits_conflicting_hints(w):
     assert by_source["hint-b"] == second
 
 
-def test_auto_archive_rejects_cross_kind_group_and_respects_separation(w):
+def test_auto_archive_ignores_legacy_object_in_cross_kind_group_and_respects_separation(w):
     camera = make_camera(w)
     service = Discovery(w)
-    with pytest.raises(AppError, match="INVALID_MODEL_REFERENCES"):
-        with w.db.write() as conn:
-            insert_discovery_candidate(w, conn, camera, "person", "person")
-            insert_discovery_candidate(w, conn, camera, "object", "object")
-            service.archive(
-                conn,
-                service.pending(conn),
-                [{"candidate_keys": ["person", "object"], "entity_id": None}],
-            )
+    with w.db.write() as conn:
+        insert_discovery_candidate(w, conn, camera, "person", "person")
+        insert_discovery_candidate(w, conn, camera, "object", "object")
+        service.archive(
+            conn,
+            service.pending(conn),
+            [{"candidate_keys": ["person", "object"], "entity_id": None}],
+        )
+        assert conn.execute(
+            select(s.discovery_candidates.c.state).where(s.discovery_candidates.c.id == "object")
+        ).scalar_one() == "discarded"
 
     with w.db.write() as conn:
         first = service.new_entity(conn, {"kind": "person", "name": "人物一", "description": "特征一"})
@@ -439,7 +443,7 @@ def test_reference_capacity_selects_without_blocking_activity(w, jpeg, clock):
         row = conn.execute(select(s.providers)).mappings().one()
         conn.execute(update(s.providers).values(config_json=row["config_json"] | {"max_total_images": 2}))
         w.assets.validate_capacity(conn)
-        assert len(w.assets.reference_set(conn, None)["members_json"]) == 1
+        assert len(w.assets.reference_set(conn, None)["members_json"]) == 0
 
 
 def test_history_repair_is_local_idempotent_and_conservative(w):

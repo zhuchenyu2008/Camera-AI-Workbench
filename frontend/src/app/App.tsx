@@ -102,7 +102,7 @@ export const navigation = [
   { to: "/minutes", label: "分钟记录", icon: CalendarDays, group: "查看" },
   { to: "/reports", label: "小时 / 日报", icon: FileText, group: "查看" },
   { to: "/cameras", label: "摄像头", icon: Camera, group: "管理" },
-  { to: "/entities", label: "人物与物品", icon: Users, group: "管理" },
+  { to: "/entities", label: "人物档案", icon: Users, group: "管理" },
   { to: "/settings/ai", label: "AI 服务", icon: Workflow, group: "管理" },
   {
     to: "/settings/analysis",
@@ -251,7 +251,7 @@ function Shell() {
         <main id="main-content" className="main-content">
           {health.isSuccess &&
             (health.data.api_version !== "2.0" ||
-              health.data.database_schema !== "0005") && (
+              health.data.database_schema !== "0006") && (
               <Notice tone="warning">
                 后台仍是旧版本，请使用启动脚本统一重启工作台并完成数据库升级；旧后台可能缺少汇率、模型价格等接口。
               </Notice>

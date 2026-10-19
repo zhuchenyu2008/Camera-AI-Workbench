@@ -20,6 +20,7 @@ AI_KINDS = IMAGE_KINDS | {
     "summarize_day",
     "manual_records",
     "entity_discovery",
+    "minute_decision",
 }
 
 

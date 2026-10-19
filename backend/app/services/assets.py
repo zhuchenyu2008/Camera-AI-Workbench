@@ -296,6 +296,8 @@ class Assets:
                 s.reference_assets.c.enabled.is_(True),
                 s.entities.c.deleted_at_ms.is_(None),
                 s.entities.c.enabled.is_(True),
+                # 参考资料只用于人物身份；普通物品不再进入任何模型请求。
+                s.entities.c.kind == "person",
             )
             .order_by(s.reference_assets.c.id)
         )
@@ -337,7 +339,10 @@ class Assets:
                 [cfg.max_total_images_per_request]
                 + [self.w.effective_limits(cfg, p)["max_total_images"] for p in providers]
             )
-            - 1
+            - min(
+                [cfg.max_capture_images_per_request]
+                + [self.w.effective_limits(cfg, p)["max_capture_images"] for p in providers]
+            )
         )
         byte_limit = (
             min(
@@ -355,13 +360,23 @@ class Assets:
                 m["asset_id"],
             )
         )
-        selected, seen, used = [], set(), 0
+        # Give every person one representative before allowing additional
+        # views. This keeps a large profile from consuming the现场图 quota;
+        # the second pass provides deterministic rotation among extra views.
+        first_by_person, extras = [], []
+        seen_people = set()
         for member in members:
+            if member["entity_id"] in seen_people:
+                extras.append(member)
+            else:
+                first_by_person.append(member)
+                seen_people.add(member["entity_id"])
+        selected, used = [], 0
+        for member in first_by_person + extras:
             size = (member["bytes"] + 2) // 3 * 4 + 2048
-            if member["entity_id"] in seen or len(selected) >= image_limit or used + size > byte_limit:
+            if len(selected) >= image_limit or used + size > byte_limit:
                 continue
             selected.append(member)
-            seen.add(member["entity_id"])
             used += size
         members = selected
         key = fingerprint(members)
@@ -480,6 +495,8 @@ class Assets:
         )
 
     def create_entity(self, conn, dto: EntityCreate):
+        if dto.kind != "person":
+            raise AppError(422, "VALIDATION_ERROR", "只允许创建人物档案")
         if dto.enabled or dto.is_primary_subject:
             raise AppError(422, "REFERENCE_REQUIRED", "请先保存草稿并上传启用参考图，再启用档案")
         for camera_id in dto.camera_ids:

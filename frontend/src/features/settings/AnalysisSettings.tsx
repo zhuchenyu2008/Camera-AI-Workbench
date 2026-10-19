@@ -301,7 +301,7 @@ function SettingsForm({ settings }: { settings: SettingsDto }) {
             )}
           </Panel>
         ))}
-        <Panel title="自动人物与物品档案">
+        <Panel title="自动人物档案">
           <label className="check-row">
             <input
               type="checkbox"
@@ -313,7 +313,7 @@ function SettingsForm({ settings }: { settings: SettingsDto }) {
             随画面分析自动建档并保存代表图
           </label>
           <p className="caption muted">
-            自动记录人物和活动相关物品，之后可改名、合并或拆分。关闭后仍正常记录活动，已有档案继续保留。
+            自动记录画面中的人物，之后可改名、合并或拆分。关闭后仍正常记录活动，已有档案继续保留。
           </p>
         </Panel>
         <Panel title="附加活动标签（可选）">

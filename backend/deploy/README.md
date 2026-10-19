@@ -15,4 +15,4 @@
 
 应用 API / worker 各自使用 15 个、每个最多 10 MB 的轮转日志，总规划为 300 MB，时间带北京时间偏移。日志仅记录安全代码和 ID，不记录请求图片、Base64、密码、密钥或第三方响应正文。系统 journal 的总额度由现有服务器运维策略控制。
 
-升级到0005时，在一致性备份后执行`repair-activities`；该命令不调用模型。不要只热更新前端；API和worker均需重启，健康接口应返回api_version=2.0、database_schema=0005。
+升级到0006时，在一致性备份后执行`repair-activities`；该命令不调用模型。不要只热更新前端；API和worker均需重启，健康接口应返回api_version=2.0、database_schema=0006。

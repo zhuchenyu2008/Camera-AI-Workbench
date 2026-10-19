@@ -171,7 +171,7 @@ def serve(config: Config) -> None:
                                     health = json.load(response)
                                     if (
                                         health.get("api_version") != "2.0"
-                                        or health.get("database_schema") != "0005"
+                                        or health.get("database_schema") != "0006"
                                     ):
                                         raise RuntimeError(
                                             "后台版本不一致，请停止旧 API 和 worker 后统一重启"

@@ -27,7 +27,7 @@ export function EntityDetail() {
   const q = useApi("getEntity", { path: { entity_id: entityId } });
   return (
     <>
-      <BackLink to="/entities" label="返回人物与物品" />
+      <BackLink to="/entities" label="返回人物档案" />
       <QueryState query={q}>
         {({ data: e }) => <EntityForm key={e.id} entity={e} />}
       </QueryState>
@@ -88,7 +88,7 @@ function EntityForm({ entity }: { entity: EntityDto }) {
       <PageHeading
         kicker="REFERENCE / PROFILE"
         title={base.name}
-        description={`${base.kind === "person" ? "人物" : "物品"} · v${entity.revision} · 长期参考资产`}
+        description={`人物 · v${entity.revision} · 长期参考资产`}
         action={
           <Badge tone={entity.enabled ? "success" : "neutral"}>
             {entity.enabled ? "已启用" : "草稿"}
@@ -809,7 +809,7 @@ function EntityAssociations({
                 disabled={!selected.length}
                 onClick={() => {
                   setName(
-                    `${entity.kind === "person" ? "人物" : "物品"}（拆分）`,
+                    "人物（拆分）",
                   );
                   setMode("split");
                 }}

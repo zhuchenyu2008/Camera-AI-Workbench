@@ -6733,10 +6733,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "enum": [
-                    "person",
-                    "object"
-                  ],
+                  "const": "person",
                   "type": "string"
                 },
                 {
@@ -11958,6 +11955,11 @@
           "duration_ms": {
             "type": "integer",
             "title": "Duration Ms"
+          },
+          "estimated_ms": {
+            "type": "integer",
+            "title": "Estimated Ms",
+            "default": 0
           }
         },
         "additionalProperties": false,
@@ -12962,6 +12964,11 @@
             "title": "Conflict Ms",
             "default": 0
           },
+          "inferred_ms": {
+            "type": "integer",
+            "title": "Inferred Ms",
+            "default": 0
+          },
           "unanalysed_pending_ms": {
             "type": "integer",
             "title": "Unanalysed Pending Ms",
@@ -13029,11 +13036,9 @@
           },
           "kind": {
             "type": "string",
-            "enum": [
-              "person",
-              "object"
-            ],
-            "title": "Kind"
+            "const": "person",
+            "title": "Kind",
+            "default": "person"
           },
           "description": {
             "type": "string",
@@ -13065,8 +13070,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "name",
-          "kind"
+          "name"
         ],
         "title": "EntityCreate"
       },
@@ -13082,10 +13086,7 @@
           },
           "kind": {
             "type": "string",
-            "enum": [
-              "person",
-              "object"
-            ],
+            "const": "person",
             "title": "Kind"
           },
           "name": {
@@ -15897,6 +15898,11 @@
             ],
             "title": "Detail Mode",
             "default": "auto"
+          },
+          "tool_calling": {
+            "type": "boolean",
+            "title": "Tool Calling",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -16258,6 +16264,11 @@
               "mixed"
             ],
             "title": "Support"
+          },
+          "inferred": {
+            "type": "boolean",
+            "title": "Inferred",
+            "default": false
           }
         },
         "additionalProperties": false,

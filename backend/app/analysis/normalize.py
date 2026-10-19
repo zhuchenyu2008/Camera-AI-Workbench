@@ -5,7 +5,7 @@ from collections import defaultdict
 from app.activities.names import match_activity_name
 from app.errors import AppError
 from app.schemas import VisualOutput
-from app.timeutils import intersect, iso, timestamp, union
+from app.timeutils import intersect, iso, subtract, timestamp, union
 
 
 def validate_visual(
@@ -16,7 +16,6 @@ def validate_visual(
 ) -> None:
     evidence = {frame["id"]: frame for frame in frames}
     people = {m["entity_id"] for m in members if m["kind"] == "person"}
-    objects = {m["entity_id"] for m in members if m["kind"] == "object"}
     minute_starts = {timestamp(f["captured_at"]) // 60000 * 60000 for f in frames}
     seen = set()
     for minute in output.minutes:
@@ -36,7 +35,8 @@ def validate_visual(
             if (
                 observation.subject_id is not None
                 and observation.subject_id not in people
-                or not set(observation.object_ids) <= objects
+                or observation.object_ids
+                or observation.object_candidate_keys
                 or (bool(labels) and not set(observation.labels) <= set(labels))
             ):
                 raise AppError(422, "INVALID_MODEL_REFERENCES", "模型引用了参考集以外的主体、物品或标签")
@@ -111,6 +111,13 @@ def normalize(
                                 else None,
                             )
                         ].append((slot, evidence_id, observation))
+    # All evidence points are used to reject an edge inference when another
+    # activity, away, or unknown is explicitly present in the same minute.
+    all_points_by_minute = defaultdict(list)
+    for raw in anchors.values():
+        for point in raw:
+            all_points_by_minute[point[0] // 60000 * 60000].append(point)
+
     segments = []
     for (subject, identity, _candidate), raw in anchors.items():
         unique = {
@@ -120,7 +127,7 @@ def normalize(
         points = sorted(unique.values(), key=lambda p: (p[0], p[1], p[2]["activity"]))
         intervals = []
         for slot, evidence_id, item in points:
-            intervals.append((slot, slot + 1000, [evidence_id], item, {}))
+            intervals.append((slot, slot + 1000, [evidence_id], item, {}, False))
         for left, right in zip(points, points[1:]):
             a, b = left[0], right[0]
             if b <= a or b - a > max_gap_seconds * 1000:
@@ -130,56 +137,96 @@ def normalize(
             if not full or unresolved:
                 continue
             if left[2]["activity"] == right[2]["activity"]:
-                intervals.append((a, b + 1000, [left[1], right[1]], left[2], {}))
+                intervals.append((a, b + 1000, [left[1], right[1]], left[2], {}, False))
             else:
                 review = True
                 middle = ((a + b) // 2000) * 1000
-                intervals.append(
-                    (
-                        a,
-                        max(a + 1000, middle),
-                        [left[1], right[1]],
-                        left[2],
-                        {"end_lower": iso(a), "end_upper": iso(b)},
-                    )
+                intervals.extend(
+                    [
+                        (
+                            a,
+                            max(a + 1000, middle),
+                            [left[1], right[1]],
+                            left[2],
+                            {"end_lower": iso(a), "end_upper": iso(b)},
+                            False,
+                        ),
+                        (
+                            max(a + 1000, middle),
+                            b + 1000,
+                            [left[1], right[1]],
+                            right[2],
+                            {"start_lower": iso(a), "start_upper": iso(b)},
+                            False,
+                        ),
+                    ]
                 )
-                intervals.append(
-                    (
-                        max(a + 1000, middle),
-                        b + 1000,
-                        [left[1], right[1]],
-                        right[2],
-                        {"start_lower": iso(a), "start_upper": iso(b)},
-                    )
+
+        # The requested rule: matching evidence near both edges of one minute
+        # can cover the whole minute, while the missing middle remains visible
+        # in coverage as a capture gap or analysis gap.
+        by_minute = defaultdict(list)
+        for point in points:
+            by_minute[point[0] // 60000 * 60000].append(point)
+        for minute_start, local in by_minute.items():
+            left_edge = [p for p in local if p[0] < minute_start + 15000]
+            right_edge = [p for p in local if p[0] >= minute_start + 45000]
+            if not left_edge or not right_edge:
+                continue
+            activity = left_edge[0][2]["activity"]
+            right_match = [p for p in right_edge if p[2]["activity"] == activity]
+            if activity in {"unknown", "away"} or not right_match:
+                continue
+            conflict = any(item[2]["activity"] not in {activity} for item in all_points_by_minute[minute_start])
+            minute_range = [(minute_start, minute_start + 60000)]
+            if conflict or (blocked and intersect(blocked, minute_range)):
+                review = True
+                continue
+            item = right_match[-1][2]
+            intervals.append(
+                (
+                    minute_start,
+                    minute_start + 60000,
+                    sorted({p[1] for p in left_edge + right_match}),
+                    item,
+                    {"start_lower": iso(left_edge[0][0]), "end_upper": iso(right_match[-1][0] + 1000)},
+                    True,
                 )
+            )
+
         grouped = defaultdict(list)
-        for a, b, ids, item, boundary in intervals:
-            key = (item["activity"], tuple(item["labels"]), tuple(item["object_ids"]))
-            grouped[key].append((a, b, ids, item, boundary))
+        for a, b, ids, item, boundary, estimated in intervals:
+            key = (item["activity"], tuple(item["labels"]), tuple(item["object_ids"]), estimated)
+            grouped[key].append((a, b, ids, item, boundary, estimated))
         for _, spans in grouped.items():
             merged = union([(a, b) for a, b, *_ in spans])
-            for a, b in intersect(merged, captured):
+            for a, b in merged:
                 related = [span for span in spans if span[0] < b and span[1] > a]
                 item = related[0][3]
                 boundary = {k: v for span in related for k, v in span[4].items()}
-                segments.append(
-                    dict(
-                        subject_id=subject if identity == "matched" else None,
-                        identity_status=identity,
-                        activity=item["activity"],
-                        start_at_ms=a,
-                        end_at_ms=b,
-                        origin="ai",
-                        support=support,
-                        boundary_json=boundary,
-                        evidence_ids_json=sorted({e for span in related for e in span[2]}),
-                        details_json={
-                            "labels": item["labels"],
-                            "object_ids": item["object_ids"],
-                            "observation": item["observation"],
-                            "subject_candidate_key": item.get("subject_candidate_key"),
-                            "object_candidate_keys": item.get("object_candidate_keys", []),
-                        },
+                estimated = any(span[5] for span in related)
+                ranges = subtract([(a, b)], captured) if estimated else intersect([(a, b)], captured)
+                for start, end in ranges:
+                    segments.append(
+                        dict(
+                            subject_id=subject if identity == "matched" else None,
+                            identity_status=identity,
+                            activity=item["activity"],
+                            start_at_ms=start,
+                            end_at_ms=end,
+                            origin="ai",
+                            support=support,
+                            boundary_json=boundary,
+                            evidence_ids_json=sorted({e for span in related for e in span[2]}),
+                            details_json={
+                                "labels": item["labels"],
+                                "object_ids": [],
+                                "observation": item["observation"],
+                                "subject_candidate_key": item.get("subject_candidate_key"),
+                                "object_candidate_keys": [],
+                                "estimated_ms": end - start if estimated else 0,
+                                "inference_mode": "edge_estimated" if estimated else "observed",
+                            },
+                        )
                     )
-                )
     return segments, review

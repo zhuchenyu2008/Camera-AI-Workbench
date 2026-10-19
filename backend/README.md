@@ -11,7 +11,7 @@ python -m venv ../.venv
 ../.venv/Scripts/python -m pytest
 ```
 
-完整依赖锁包含运行和验收工具，干净环境可执行 `python -m pip install -r requirements.lock`。当前数据库迁移为 `0005`。生成同源 OpenAPI、TypeScript、样例和64项路由审计用 `python -m scripts.build_contracts`；CI 用 `--check` 拒绝产物过期。TypeScript 编译命令见逐项清单。
+完整依赖锁包含运行和验收工具，干净环境可执行 `python -m pip install -r requirements.lock`。当前数据库迁移为 `0006`。生成同源 OpenAPI、TypeScript、样例和64项路由审计用 `python -m scripts.build_contracts`；CI 用 `--check` 拒绝产物过期。TypeScript 编译命令见逐项清单。
 
 Linux 部署使用 Python 虚拟环境。配置 `CAW_DATA_DIR`、`CAW_DATABASE_URL`、`CAW_MASTER_KEY_FILE`、`CAW_ALLOWED_ORIGIN`、`CAW_RTSP_ALLOWED_PORTS`、`CAW_PROVIDER_ALLOWED_HOSTS`；域名与端口由部署人员填写，主密钥必须放在仓库外。
 
@@ -31,6 +31,6 @@ AI 地址需要部署白名单，默认 HTTPS。确有本机兼容服务时用 `
 参考图片会重新解码、应用 EXIF 方向、去除元数据、保存独立 JPEG。数据库备份用 `python -m app.cli backup --destination <新快照文件>`；现场图不备份，主密钥与参考图独立受保护保存。恢复应先停止两个进程，再执行迁移、资产扫描与清理，确认 TTL 后开放 API；不要直接复制运行中的 SQLite 文件。
 
 
-升级前停止API和worker并备份，再执行`migrate`、`repair-activities`，最后统一重启。`/health/live`应显示api_version=2.0、database_schema=0005。本机启动脚本自动执行版本升级前备份、迁移与幂等历史修复。历史修复只更新确定性统计和时间线，旧汇总文案标记来源变化，不新建历史模型调用。
+升级前停止API和worker并备份，再执行`migrate`、`repair-activities`，最后统一重启。`/health/live`应显示api_version=2.0、database_schema=0006。本机启动脚本自动执行版本升级前备份、迁移与幂等历史修复。历史修复只更新确定性统计和时间线，旧汇总文案标记来源变化，不新建历史模型调用。
 
 事件列表使用轻量EventSummaryDto，详情仍使用EventDto；活动名称开放为字符串。自动建档是独立辅助任务，按最新参考目录匹配，受并发与参考配额约束，不阻断活动提交。接口与行为详见后端设计第19节。
