@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from app.activities.names import activity_name
+from app.activities.names import match_activity_name
 from app.errors import AppError
 from app.schemas import VisualOutput
 from app.timeutils import intersect, iso, timestamp, union
 
 
-def validate_visual(output: VisualOutput, frames: list[dict], members: list[dict], labels: list[str]) -> None:
+def validate_visual(
+    output: VisualOutput,
+    frames: list[dict],
+    members: list[dict],
+    labels: list[str],
+) -> None:
     evidence = {frame["id"]: frame for frame in frames}
     people = {m["entity_id"] for m in members if m["kind"] == "person"}
     objects = {m["entity_id"] for m in members if m["kind"] == "object"}
@@ -62,6 +67,7 @@ def normalize(
     max_gap_seconds=30,
     blocked: list[tuple[int, int]] | None = None,
     support="dense",
+    activity_catalog: list[dict] | None = None,
 ) -> tuple[list[dict], bool]:
     evidence = {f["id"]: f for f in frames}
     anchors = defaultdict(list)
@@ -86,7 +92,9 @@ def normalize(
                     )
             for observation in minute["observations"]:
                 review |= observation["needs_dense_review"]
-                observation = observation | {"activity": activity_name(observation["activity"])}
+                observation = observation | {
+                    "activity": match_activity_name(observation["activity"], activity_catalog)
+                }
                 for evidence_id in set(
                     observation["supporting_evidence_ids"]
                     + [observation["start_evidence_id"], observation["end_evidence_id"]]

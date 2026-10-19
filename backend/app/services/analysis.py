@@ -4,6 +4,7 @@ import secrets
 
 from sqlalchemy import select, update
 
+from app.activities.names import activity_name
 from app.analysis.client import PROMPT_VERSION, VISUAL_PROMPT, build_payload
 from app.analysis.normalize import normalize
 from app.detection.motion import sparse_frames
@@ -19,6 +20,51 @@ from app.worker.queue import enqueue, job_dto
 class Analysis:
     def __init__(self, workbench):
         self.w = workbench
+
+    def activity_catalog(self, conn, camera_id: str) -> list[dict]:
+        """Return the recent positive activity names for one camera."""
+        now = self.w.now()
+        lookback = now - 30 * 24 * 60 * 60 * 1000
+        rows = conn.execute(
+            select(
+                s.activity_spans.c.activity,
+                s.activity_spans.c.start_at_ms,
+                s.activity_spans.c.end_at_ms,
+            )
+            .join(
+                s.minute_records,
+                (s.minute_records.c.id == s.activity_spans.c.minute_id)
+                & (s.minute_records.c.current_revision == s.activity_spans.c.minute_revision),
+            )
+            .where(
+                s.activity_spans.c.camera_id == camera_id,
+                s.activity_spans.c.end_at_ms > lookback,
+                s.activity_spans.c.start_at_ms < now,
+            )
+        ).mappings()
+        grouped = {}
+        for row in rows:
+            name = activity_name(row["activity"])
+            if name in {"unknown", "away"}:
+                continue
+            start = max(lookback, row["start_at_ms"])
+            end = min(now, row["end_at_ms"])
+            if start >= end:
+                continue
+            item = grouped.setdefault(name, {"name": name, "duration_ms": 0, "last_seen_at_ms": 0})
+            item["duration_ms"] += end - start
+            item["last_seen_at_ms"] = max(item["last_seen_at_ms"], end)
+        ordered = sorted(
+            grouped.values(), key=lambda item: (-item["duration_ms"], -item["last_seen_at_ms"], item["name"])
+        )[:50]
+        return [
+            {
+                "name": item["name"],
+                "duration_ms": item["duration_ms"],
+                "last_seen_at": iso(item["last_seen_at_ms"]),
+            }
+            for item in ordered
+        ]
 
     def available(self, conn, camera_ids, start, end):
         rows = (
@@ -74,8 +120,17 @@ class Analysis:
         if not provider_id:
             raise AppError(422, "PROVIDER_NOT_VERIFIED", "尚未配置所需的模型服务")
         self.w.require_provider(one(conn, s.providers, provider_id))
+        activity_catalog = self.activity_catalog(conn, dto.camera_ids[0]) if dto.mode == "visual" else []
         estimated_batches = (
-            len(self.pack_frames(cfg, one(conn, s.providers, provider_id), refset, frames))
+            len(
+                self.pack_frames(
+                    cfg,
+                    one(conn, s.providers, provider_id),
+                    refset,
+                    frames,
+                    activity_catalog,
+                )
+            )
             if dto.mode == "visual"
             else 1
         )
@@ -143,7 +198,7 @@ class Analysis:
                 retryable=True,
             )
 
-    def estimate_size(self, provider, refset, frames, labels):
+    def estimate_size(self, provider, refset, frames, labels, activity_catalog=None):
         content, encoded_bytes = [], 0
         detail = provider["config_json"]["detail_mode"]
 
@@ -173,12 +228,13 @@ class Analysis:
             ]
             encoded_bytes += (frame["bytes"] + 2) // 3 * 4
         content.append({"type": "text", "text": "允许标签：" + canonical(labels)})
+        content.append({"type": "text", "text": "已有活动目录：" + canonical(activity_catalog or [])})
         return (
             len(canonical(build_payload(provider, VisualOutput, content, VISUAL_PROMPT)).encode())
             + encoded_bytes
         )
 
-    def pack_frames(self, cfg, provider, refset, frames):
+    def pack_frames(self, cfg, provider, refset, frames, activity_catalog=None):
         limits = self.w.effective_limits(cfg, provider)
         capacity = min(limits["max_capture_images"], limits["max_total_images"] - len(refset["members_json"]))
         if capacity < 1:
@@ -188,7 +244,7 @@ class Analysis:
             candidate = batch + [frame]
             if (
                 len(candidate) > capacity
-                or self.estimate_size(provider, refset, candidate, cfg.activity_labels)
+                or self.estimate_size(provider, refset, candidate, cfg.activity_labels, activity_catalog)
                 > limits["max_request_body_bytes"]
             ):
                 if not batch:
@@ -198,7 +254,7 @@ class Analysis:
                 batches.append(batch)
                 batch = [frame]
                 if (
-                    self.estimate_size(provider, refset, batch, cfg.activity_labels)
+                    self.estimate_size(provider, refset, batch, cfg.activity_labels, activity_catalog)
                     > limits["max_request_body_bytes"]
                 ):
                     raise AppError(422, "REFERENCE_CAPACITY_EXCEEDED", "单图与完整参考集超过请求体上限")
@@ -215,7 +271,8 @@ class Analysis:
             raise AppError(422, "PROVIDER_NOT_VERIFIED", "未配置视觉模型")
         provider = one(conn, s.providers, cfg.vision_provider_id)
         self.w.require_provider(provider)
-        batches = self.pack_frames(cfg, provider, refset, frames)
+        activity_catalog = self.activity_catalog(conn, camera_id)
+        batches = self.pack_frames(cfg, provider, refset, frames, activity_catalog)
         minutes = sorted({f["slot_at_ms"] // 60000 * 60000 for f in frames})
         baselines = []
         for start in minutes:
@@ -248,6 +305,7 @@ class Analysis:
             run_created_at=stamp,
             baselines=baselines,
             activity_labels=cfg.activity_labels,
+            activity_catalog=activity_catalog,
         )
         key = fingerprint(
             {k: v for k, v in common.items() if k not in {"run_created_at", "baselines"}}
@@ -379,6 +437,7 @@ class Analysis:
                 max_gap_seconds=self.w.settings_config(conn).max_inference_gap_seconds,
                 blocked=blocked,
                 support=payload["mode"],
+                activity_catalog=payload.get("activity_catalog", []),
             )
             # 归档可能先于分钟协调完成，使用当前候选映射接回身份，不影响活动。
             for span in spans:
@@ -469,6 +528,7 @@ class Analysis:
             ) + 1
             result = dict(
                 visual_outputs=(existing.get("visual_outputs", []) if preserved else []) + local_outputs,
+                activity_catalog=payload.get("activity_catalog", []),
                 analysis_mode="mixed" if len({span["support"] for span in spans}) > 1 else payload["mode"],
                 analysis_state=state,
                 description="；".join(dict.fromkeys(span["details_json"]["observation"] for span in spans))[

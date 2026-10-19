@@ -7,6 +7,7 @@ import httpx
 import pytest
 from sqlalchemy import select, update
 
+from app.activities.names import activity_name, match_activity_name
 from app.analysis.client import AIClient
 from app.analysis.normalize import normalize, validate_visual
 from app.capture.frames import FrameWriter
@@ -21,7 +22,7 @@ from app.services.assets import decode_image
 from app.services.records import Records
 from app.timeutils import iso, timestamp
 from app.worker.executor import Executor
-from tests.conftest import make_camera, make_provider
+from tests.conftest import make_camera, make_minute, make_provider
 
 
 def make_person(w, jpeg):
@@ -116,6 +117,87 @@ def fake_visual(request, person, *, activity="reading", ref_assert=None):
 def _reset_job_for_retry(w, job_id):
     with w.db.write() as conn:
         conn.execute(s.jobs.update().where(s.jobs.c.id == job_id).values(not_before_ms=w.now()))
+
+
+def test_activity_catalog_uses_current_camera_history_and_caps(w, clock):
+    camera = make_camera(w)
+    recent = clock.value - 60_000
+    make_minute(w, camera, recent, activity="开关门进出房间")
+    make_minute(w, camera, recent - 60_000, activity="离开画面")
+    make_minute(w, camera, recent - 120_000, activity="unknown")
+    make_minute(w, camera, clock.value - 31 * 24 * 60 * 60 * 1000, activity="过期活动")
+    for index in range(51):
+        make_minute(w, camera, recent - (index + 3) * 60_000, activity=f"活动{index}")
+
+    with w.db.read() as conn:
+        catalog = Analysis(w).activity_catalog(conn, camera)
+
+    names = [item["name"] for item in catalog]
+    assert len(catalog) == 50
+    assert "开关门进出房间" in names
+    assert "离开画面" not in names
+    assert "unknown" not in names
+    assert "过期活动" not in names
+
+
+def test_activity_name_normalizes_text_and_reuses_catalog_name():
+    assert activity_name("  １２３  ") == "123"
+    assert activity_name("阅读") == "reading"
+    assert match_activity_name("  开关门进出房间 ", [{"name": "开关门进出房间"}]) == "开关门进出房间"
+
+
+def test_activity_catalog_is_sent_to_visual_model_and_reused(w, clock, jpeg):
+    make_provider(w)
+    camera = make_camera(w)
+    make_minute(w, camera, clock.value - 60_000, activity="开关门进出房间")
+    person, _ = make_person(w, jpeg)
+    camera, start, frames = fill_minute(w, clock, jpeg, camera)
+    with w.db.write() as conn:
+        refs = w.assets.reference_set(conn, [camera])
+        root = Analysis(w).plan(conn, camera, frames, refs, "dense", manual=True)
+        child = one(
+            conn,
+            s.jobs,
+            list(
+                conn.execute(
+                    select(s.jobs.c.id).where(s.jobs.c.kind == "dense_analysis")
+                ).scalars()
+            )[0],
+        )
+        assert child["payload_json"]["activity_catalog"][0]["name"] == "开关门进出房间"
+
+    def check(payload):
+        catalog = [
+            item["text"]
+            for item in payload["messages"][1]["content"]
+            if item.get("text", "").startswith("已有活动目录")
+        ]
+        assert len(catalog) == 1 and "开关门进出房间" in catalog[0]
+
+    client = AIClient(
+        w,
+        httpx.MockTransport(
+            lambda request: fake_visual(
+                request,
+                person,
+                activity="开关门进出房间",
+                ref_assert=check,
+            )
+        ),
+    )
+    try:
+        import asyncio
+
+        asyncio.run(drain(w, Executor(w, Supervisor(w), client)))
+    finally:
+        import asyncio
+
+        asyncio.run(client.close())
+
+    with w.db.read() as conn:
+        assert one(conn, s.jobs, root["id"])["state"] == "succeeded"
+        current = w.ledger.spans(conn, [camera], start, start + 60_000)
+        assert {span["activity"] for span in current} == {"开关门进出房间"}
 
 
 def test_model_protocol_error_gets_only_one_retry(w):

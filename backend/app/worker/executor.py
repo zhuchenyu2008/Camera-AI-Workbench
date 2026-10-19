@@ -99,6 +99,13 @@ class Executor:
         )
         labels = payload.get("activity_labels", cfg.activity_labels)
         content.append({"type": "text", "text": "允许标签：" + canonical(labels)})
+        content.append(
+            {
+                "type": "text",
+                "text": "已有活动目录（匹配时必须复用名称）："
+                + canonical(payload.get("activity_catalog", [])),
+            }
+        )
         discovery_enabled = cfg.auto_discovery_enabled
         content.append({"type": "text", "text": "自动建档：" + ("开启" if discovery_enabled else "关闭")})
         body = build_payload(provider, VisualOutput, content, VISUAL_PROMPT)

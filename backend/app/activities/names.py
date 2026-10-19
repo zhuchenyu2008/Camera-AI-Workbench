@@ -1,5 +1,7 @@
 """兼容历史活动代码；新活动名称不受词表限制。"""
 
+import unicodedata
+
 ALIASES = {
     "阅读": "reading",
     "读书": "reading",
@@ -17,5 +19,14 @@ ALIASES = {
 
 
 def activity_name(value: str) -> str:
-    value = value.strip()
+    value = unicodedata.normalize("NFKC", value).strip()
     return ALIASES.get(value, value)
+
+
+def match_activity_name(value: str, catalog: list[dict] | None = None) -> str:
+    """Normalize a model name and reuse an exact name from the current catalog."""
+    normalized = activity_name(value)
+    if not catalog:
+        return normalized
+    names = {activity_name(item["name"]): item["name"] for item in catalog if item.get("name")}
+    return names.get(normalized, normalized)

@@ -64,6 +64,7 @@ def reproject(w, patch):
                     captured,
                     max_gap_seconds=w.settings_config(conn).max_inference_gap_seconds,
                     support="sparse",
+                    activity_catalog=result.get("activity_catalog", []),
                 )
                 old_spans = result.get("projection_base_spans") or w.ledger.spans(
                     conn, [minute["camera_id"]], start, end
