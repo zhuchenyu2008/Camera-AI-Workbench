@@ -5,11 +5,19 @@ from decimal import Decimal
 from ipaddress import IPv4Address
 from typing import Annotated, Generic, Literal, TypeVar
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.timeutils import timestamp
 
-Activity = Literal["reading", "writing", "computer", "phone", "away", "resting", "other", "unknown"]
+Activity = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
 Identity = Literal["matched", "possible", "unknown"]
 CaptureState = Literal["stopped", "starting", "online", "offline", "resource_paused", "error"]
 Density = Literal["sparse", "dense", "settling"]
@@ -23,6 +31,12 @@ TimeOfDay = Annotated[str, Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")]
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True, allow_inf_nan=False)
+
+
+class HealthDto(Strict):
+    alive: bool
+    api_version: str
+    database_schema: str
 
 
 class Meta(Strict):
@@ -366,7 +380,11 @@ class EntityDto(Strict):
     name: str
     description: str
     enabled: bool
-    is_primary_subject: bool
+    is_primary_subject: bool = Field(deprecated=True)
+    origin: Literal["manual", "automatic"] = "manual"
+    reviewed: bool = True
+    merged_into_id: str | None = None
+    last_seen_at: AwareDatetime | None = None
     camera_ids: list[str]
     references: list[ReferenceDto]
     reference_capacity: dict
@@ -467,7 +485,12 @@ class ProviderPricingWrite(Strict):
     @model_validator(mode="after")
     def validate_pricing_write(self):
         if not self.clear:
-            if not self.currency or self.input_price is None or self.output_price is None or not self.source_note:
+            if (
+                not self.currency
+                or self.input_price is None
+                or self.output_price is None
+                or not self.source_note
+            ):
                 raise ValueError("设置价格时必须提供币种、普通输入单价、输出单价和来源说明")
 
             def check_price(val: str, name: str):
@@ -533,7 +556,8 @@ class SettingsConfig(Strict):
     detailed_audit_days: Annotated[int, Field(ge=1, le=30)] = 7
     vision_provider_id: str | None = None
     summary_provider_id: str | None = None
-    primary_subject_id: str | None = None
+    primary_subject_id: str | None = Field(default=None, deprecated=True)
+    auto_discovery_enabled: bool = True
     activity_labels: Annotated[
         list[Annotated[str, Field(min_length=1, max_length=64)]], Field(max_length=100)
     ] = []
@@ -767,7 +791,7 @@ class MinuteDto(Strict):
     versions: list[dict] = []
 
 
-class EventDto(Strict):
+class EventSummaryDto(Strict):
     id: str
     revision: int
     source_revision: int
@@ -780,12 +804,15 @@ class EventDto(Strict):
     start_at: AwareDatetime
     end_at: AwareDatetime
     duration_ms: int
-    segments: list[SegmentDto]
-    interruptions: list[dict]
-    minute_refs: list[dict]
     evidence_state: EvidenceState
     source_state: Literal["current", "stale"]
     has_manual_revision: bool
+
+
+class EventDto(EventSummaryDto):
+    segments: list[SegmentDto]
+    interruptions: list[dict]
+    minute_refs: list[dict]
     replacement_event_ids: list[str]
 
 
@@ -823,6 +850,8 @@ class Observation(Strict):
     supporting_evidence_ids: Annotated[list[str], Field(min_length=1, max_length=100)]
     observation: Annotated[str, Field(max_length=500)]
     needs_dense_review: bool
+    subject_candidate_key: str | None = None
+    object_candidate_keys: list[str] = Field(default_factory=list, max_length=32)
 
 
 class VisualMinute(Strict):
@@ -832,9 +861,54 @@ class VisualMinute(Strict):
     review_reasons: Annotated[list[Annotated[str, Field(max_length=200)]], Field(max_length=20)]
 
 
+class EntityCandidate(Strict):
+    key: Annotated[str, Field(min_length=1, max_length=100)]
+    kind: Literal["person", "object"]
+    name: Name
+    description: Annotated[str, Field(max_length=1000)] = ""
+    evidence_id: str
+    crop: Crop
+    matched_entity_id: str | None = None
+
+
 class VisualOutput(Strict):
     schema_version: Literal["1.0"]
     minutes: Annotated[list[VisualMinute], Field(min_length=1, max_length=5)]
+    # 候选独立校验，坏候选不能导致有效的活动观察失败。
+    entity_candidates: list[EntityCandidate] = Field(default_factory=list, max_length=100)
+
+    @field_validator("entity_candidates", mode="before")
+    @classmethod
+    def valid_candidates(cls, value):
+        from pydantic import ValidationError
+
+        result = []
+        for raw in value[:100] if isinstance(value, list) else []:
+            try:
+                result.append(EntityCandidate.model_validate(raw))
+            except (ValidationError, TypeError):
+                continue
+        return result
+
+
+class EntityOccurrenceDto(Strict):
+    id: str
+    entity_id: str
+    camera_id: str
+    captured_at: AwareDatetime
+    evidence_id: str
+    crop: Crop
+    manual: bool
+
+
+class EntityMerge(Strict):
+    target_entity_id: str
+    target_revision: Annotated[int, Field(ge=1)]
+
+
+class EntitySplit(Strict):
+    name: Name
+    occurrence_ids: Annotated[list[str], Field(min_length=1, max_length=500)]
 
 
 class SourceRef(Strict):
@@ -869,7 +943,7 @@ class OverviewDto(Strict):
     activities: list[ActivityDuration]
     duration_is_estimated: bool
     projection_revision: int
-    latest_events: list[EventDto]
+    latest_events: list[EventSummaryDto]
     warnings: list[WarningDto]
 
 

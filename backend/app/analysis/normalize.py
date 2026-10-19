@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from app.activities.names import activity_name
 from app.errors import AppError
 from app.schemas import VisualOutput
 from app.timeutils import intersect, iso, timestamp, union
@@ -31,7 +32,7 @@ def validate_visual(output: VisualOutput, frames: list[dict], members: list[dict
                 observation.subject_id is not None
                 and observation.subject_id not in people
                 or not set(observation.object_ids) <= objects
-                or not set(observation.labels) <= set(labels)
+                or (bool(labels) and not set(observation.labels) <= set(labels))
             ):
                 raise AppError(422, "INVALID_MODEL_REFERENCES", "模型引用了参考集以外的主体、物品或标签")
             if (
@@ -71,7 +72,7 @@ def normalize(
             for evidence_id in minute["unresolved_evidence_ids"]:
                 if evidence_id in evidence:
                     slot = timestamp(evidence[evidence_id]["captured_at"]) // 1000 * 1000
-                    anchors[(None, "unknown")].append(
+                    anchors[(None, "unknown", None)].append(
                         (
                             slot,
                             evidence_id,
@@ -84,7 +85,8 @@ def normalize(
                         )
                     )
             for observation in minute["observations"]:
-                review |= observation["needs_dense_review"] or observation["identity_status"] != "matched"
+                review |= observation["needs_dense_review"]
+                observation = observation | {"activity": activity_name(observation["activity"])}
                 for evidence_id in set(
                     observation["supporting_evidence_ids"]
                     + [observation["start_evidence_id"], observation["end_evidence_id"]]
@@ -92,11 +94,17 @@ def normalize(
                     if evidence_id in evidence:
                         frame = evidence[evidence_id]
                         slot = timestamp(frame["captured_at"]) // 1000 * 1000
-                        anchors[(observation["subject_id"], observation["identity_status"])].append(
-                            (slot, evidence_id, observation)
-                        )
+                        anchors[
+                            (
+                                observation["subject_id"],
+                                observation["identity_status"],
+                                observation.get("subject_candidate_key")
+                                if observation["subject_id"] is None
+                                else None,
+                            )
+                        ].append((slot, evidence_id, observation))
     segments = []
-    for (subject, identity), raw in anchors.items():
+    for (subject, identity, _candidate), raw in anchors.items():
         unique = {
             (slot, evidence_id, item["activity"]): (slot, evidence_id, item)
             for slot, evidence_id, item in raw
@@ -161,6 +169,8 @@ def normalize(
                             "labels": item["labels"],
                             "object_ids": item["object_ids"],
                             "observation": item["observation"],
+                            "subject_candidate_key": item.get("subject_candidate_key"),
+                            "object_candidate_keys": item.get("object_candidate_keys", []),
                         },
                     )
                 )

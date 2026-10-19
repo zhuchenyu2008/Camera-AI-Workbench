@@ -186,6 +186,8 @@ def create_app(config: Config | None = None, workbench: Workbench | None = None)
                         "resumeCameraSchedule",
                         "updateEvent",
                         "updateEntity",
+                        "mergeEntity",
+                        "splitEntity",
                         "deleteEntity",
                         "uploadReference",
                         "promoteReference",

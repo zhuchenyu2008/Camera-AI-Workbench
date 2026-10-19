@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { CameraRuntime, EventDto } from "../api/generated/types";
 import { clock } from "./time";
 export const activities: Record<EventDto["activity"], string> = {
@@ -10,6 +11,37 @@ export const activities: Record<EventDto["activity"], string> = {
   other: "其他活动",
   unknown: "无法判断",
 };
+export function activityLabel(name: string): string {
+  return activities[name] ?? name;
+}
+export function activityStyle(name: string): CSSProperties {
+  const colors: Record<string, string> = {
+    reading: "#367b61",
+    writing: "#4f7892",
+    computer: "#647c75",
+    phone: "#966f4f",
+    away: "#727568",
+    resting: "#a28356",
+    other: "#727568",
+    unknown: "#64716d",
+  };
+  const palette = [
+    "#477e68",
+    "#567a96",
+    "#997449",
+    "#8c6b86",
+    "#6b7c52",
+    "#a26e62",
+    "#508c8c",
+  ];
+  const hash = [...name].reduce(
+    (h, c) => (h * 31 + c.codePointAt(0)!) >>> 0,
+    0,
+  );
+  return {
+    "--activity": colors[name] ?? palette[hash % palette.length],
+  } as CSSProperties;
+}
 export const analysisLabels: Record<string, string> = {
   pending: "等待分析",
   running: "正在分析",

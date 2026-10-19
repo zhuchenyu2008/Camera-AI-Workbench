@@ -14,7 +14,13 @@ from app.timeutils import iso
 
 TERMINAL = {"succeeded", "partial", "failed", "expired", "cancelled"}
 IMAGE_KINDS = {"sparse_analysis", "dense_analysis", "dense_backfill", "manual_visual"}
-AI_KINDS = IMAGE_KINDS | {"provider_test", "summarize_hour", "summarize_day", "manual_records"}
+AI_KINDS = IMAGE_KINDS | {
+    "provider_test",
+    "summarize_hour",
+    "summarize_day",
+    "manual_records",
+    "entity_discovery",
+}
 
 
 def enqueue(
@@ -34,7 +40,9 @@ def enqueue(
     if existing:
         return dict(existing)
     priority = (
-        0
+        40
+        if kind == "entity_discovery"
+        else 0
         if kind in {"cleanup_assets", "apply_settings", "project_events", "exchange_rate_refresh"}
         else 10
         if kind in IMAGE_KINDS
@@ -153,6 +161,15 @@ class Queue:
                     )
                     continue
                 if row["kind"] in AI_KINDS and not allow_ai:
+                    continue
+                if (
+                    row["kind"] == "entity_discovery"
+                    and conn.execute(
+                        select(s.jobs.c.id).where(
+                            s.jobs.c.kind == "entity_discovery", s.jobs.c.state == "running"
+                        )
+                    ).first()
+                ):
                     continue
                 if row["kind"] in IMAGE_KINDS and row["payload_json"].get("camera_id") in (
                     excluded_cameras or set()

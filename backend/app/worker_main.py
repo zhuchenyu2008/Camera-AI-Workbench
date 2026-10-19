@@ -20,7 +20,7 @@ from app.services.workbench import Workbench
 from app.summaries.service import Summaries
 from app.worker.cleanup import Cleaner
 from app.worker.executor import Executor
-from app.worker.queue import AI_KINDS
+from app.worker.queue import AI_KINDS, enqueue
 
 
 class ProcessLock:
@@ -88,11 +88,23 @@ class Worker:
             Analysis(self.w).schedule(conn)
             Summaries(self.w).schedule(conn)
             self.schedule_exchange_rate(conn)
+            from app.services.discovery import Discovery
+
+            cfg = self.w.settings_config(conn)
+            if cfg.auto_discovery_enabled and cfg.vision_provider_id and Discovery(self.w).pending(conn, 1):
+                enqueue(
+                    conn,
+                    self.w.now(),
+                    "entity_discovery",
+                    {"provider_id": cfg.vision_provider_id},
+                    f"entity-discovery:{self.w.now() // 300000}",
+                )
 
     def schedule_exchange_rate(self, conn):
         if not self.w.has_usd_pricing(conn):
             return
         from datetime import datetime
+
         from app.timeutils import BEIJING
         from app.worker.queue import enqueue
 

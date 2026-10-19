@@ -22,26 +22,21 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import type {
   ActivityDuration,
   Coverage,
-  EventDto,
+  EventSummaryDto,
   ImpactPreviewDto,
 } from "../api/generated/types";
 import { api, ApiError, errorText } from "../api/client";
 import { useApi, invalidate, recordOps } from "../api/query";
 import { useAction } from "./hooks";
 import {
-  activities,
+  activityLabel,
+  activityStyle,
   evidenceLabels,
   jobLabels,
   phaseLabels,
   queueLabels,
 } from "./labels";
-import {
-  clock,
-  dateTime,
-  duration,
-  localDate,
-  dayRange,
-} from "./time";
+import { clock, dateTime, duration, localDate, dayRange } from "./time";
 
 export function Button({
   children,
@@ -521,14 +516,19 @@ export function ScopePicker({
   const scope = useScope(),
     entity = useApi("listEntities", { query: { limit: 100 } }),
     camera = useApi("listCameras", { query: { limit: 100 } });
-  const primary = entity.data?.data.find((e) => e.is_primary_subject);
+  const personal = Boolean(scope.subject && scope.subject !== "all");
   useEffect(() => {
-    if (person && scope.subject == null && primary) {
-      const next = new URLSearchParams(scope.search);
-      next.set("subject_id", primary.id);
-      scope.setSearch(next, { replace: true });
+    if (
+      cameras &&
+      scope.camera_ids.length === 0 &&
+      (!scope.subject || scope.subject === "all")
+    ) {
+      const first =
+        camera.data?.data.find((c) => c.enabled && !c.deleted_at) ??
+        camera.data?.data.find((c) => !c.deleted_at);
+      if (first) scope.update("camera_ids", [first.id]);
     }
-  }, [primary?.id, scope.subject, person]);
+  }, [camera.data, scope.camera_ids.join(","), scope.subject, cameras]);
   return (
     <div className="scope-bar">
       <div className="scope-fields">
@@ -550,15 +550,20 @@ export function ScopePicker({
             <select
               aria-label="人物范围"
               value={scope.subject ?? "all"}
-              onChange={(e) => scope.update("subject_id", e.target.value)}
+              onChange={(e) => {
+                const next = new URLSearchParams(scope.search);
+                next.set("subject_id", e.target.value);
+                next.delete("camera_ids");
+                next.delete("cursor");
+                scope.setSearch(next);
+              }}
             >
-              <option value="all">全部人物</option>
+              <option value="all">画面主要活动</option>
               {entity.data?.data
                 .filter((e) => e.kind === "person")
                 .map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.name}
-                    {e.is_primary_subject ? " · 主人物" : ""}
                   </option>
                 ))}
             </select>
@@ -571,29 +576,36 @@ export function ScopePicker({
               <span>
                 {scope.camera_ids.length
                   ? `已选 ${scope.camera_ids.length} 台`
-                  : "全部机位"}
+                  : personal
+                    ? "全部相关机位"
+                    : "选择机位"}
               </span>
             </summary>
             <div className="camera-filter-menu">
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={!scope.camera_ids.length}
-                  onChange={() => scope.update("camera_ids", [])}
-                />
-                全部机位
-              </label>
+              {personal && (
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={!scope.camera_ids.length}
+                    onChange={() => scope.update("camera_ids", [])}
+                  />
+                  全部机位
+                </label>
+              )}
               {camera.data?.data.map((c) => (
                 <label className="check-row" key={c.id}>
                   <input
-                    type="checkbox"
+                    type={personal ? "checkbox" : "radio"}
+                    name="scope-camera"
                     checked={scope.camera_ids.includes(c.id)}
                     onChange={(e) =>
                       scope.update(
                         "camera_ids",
-                        e.target.checked
-                          ? [...scope.camera_ids, c.id]
-                          : scope.camera_ids.filter((id) => id !== c.id),
+                        !personal
+                          ? [c.id]
+                          : e.target.checked
+                            ? [...scope.camera_ids, c.id]
+                            : scope.camera_ids.filter((id) => id !== c.id),
                       )
                     }
                   />
@@ -689,15 +701,18 @@ export function ActivityChart({ items }: { items: ActivityDuration[] }) {
           <div className="activity-row" key={a.activity}>
             <div className="row-between">
               <span>
-                <i className={`activity-dot ${a.activity}`} />
-                {activities[a.activity]}
+                <i className="activity-dot" style={activityStyle(a.activity)} />
+                {activityLabel(a.activity)}
               </span>
               <strong>{duration(a.duration_ms)}</strong>
             </div>
             <div className="activity-rail">
               <div
-                className={`activity-fill ${a.activity}`}
-                style={{ width: `${(a.duration_ms / max) * 100}%` }}
+                className="activity-fill"
+                style={{
+                  ...activityStyle(a.activity),
+                  width: `${(a.duration_ms / max) * 100}%`,
+                }}
               />
             </div>
           </div>
@@ -712,7 +727,7 @@ export function EventList({
   events,
   limit,
 }: {
-  events: EventDto[];
+  events: EventSummaryDto[];
   limit?: number;
 }) {
   const entity = useApi("listEntities", { query: { limit: 100 } }),
@@ -726,19 +741,19 @@ export function EventList({
           key={e.id}
           state={{ eventDrawer: true }}
         >
-          <div className={`event-symbol ${e.activity}`}>
+          <div className="event-symbol" style={activityStyle(e.activity)}>
             <span className="activity-dot" />
           </div>
           <div className="event-main">
             <div className="row-wrap">
-              <strong>{activities[e.activity]}</strong>
+              <strong>{activityLabel(e.activity)}</strong>
               <span className="caption muted">
                 {e.identity_status === "matched"
                   ? (entity.data?.data.find((x) => x.id === e.subject_id)
                       ?.name ?? "已删除人物")
                   : e.identity_status === "possible"
                     ? "人物可能匹配"
-                    : "人物未确认"}
+                    : "画面活动"}
               </span>
               {e.has_manual_revision && <Badge>人工修订</Badge>}
             </div>

@@ -91,9 +91,10 @@ export function Entities() {
                       <div>
                         <div className="row-wrap">
                           <h3>{e.name}</h3>
-                          {e.is_primary_subject && (
-                            <Badge tone="success">主人物</Badge>
-                          )}
+                          <Badge>
+                            {e.origin === "automatic" ? "自动生成" : "手动添加"}
+                            {!e.reviewed ? " · 待整理" : ""}
+                          </Badge>
                           <Badge>{e.enabled ? "已启用" : "未启用草稿"}</Badge>
                         </div>
                         <p className="caption muted">
@@ -104,12 +105,6 @@ export function Entities() {
                           · {e.references.filter((r) => r.enabled).length}{" "}
                           张启用参考图 · v{e.revision}
                         </p>
-                        {e.is_primary_subject &&
-                          !e.references.some((r) => r.enabled) && (
-                            <p className="caption">
-                              尚无启用参考图，未具备身份识别资料。
-                            </p>
-                          )}
                       </div>
                       <span className="text-link">管理资料 →</span>
                     </ScopeLink>
@@ -118,7 +113,7 @@ export function Entities() {
               ) : (
                 <EmptyState
                   title="尚无参考档案"
-                  description="添加人物或物品草稿，上传参考图片后再启用。"
+                  description="开启自动建档后，定期分析会生成人物和相关物品；也可以手动添加参考资料。"
                 />
               )}
               <Pager hasMore={page.has_more} nextCursor={page.next_cursor} />
@@ -127,7 +122,7 @@ export function Entities() {
         </QueryState>
       </Panel>
       <Notice>
-        每次视觉分析、小时汇总和日报会附当前适用的全部已启用参考图与名称；容量不足会明确报错，不自动丢弃照片。
+        参考资料只辅助识别与命名，系统按相关性选取代表图。没有档案也能正常记录活动。
       </Notice>
       {adding && (
         <Modal title="添加人物或物品" onClose={() => setAdding(false)}>
@@ -170,7 +165,7 @@ export function Entities() {
               </select>
             </Field>
             <Notice>
-              先保存未启用草稿；上传并检查参考图后，再启用或指定主人物。
+              可选地上传参考图帮助识别；无须建立主人物，也不要求多角度照片。
             </Notice>
             <ErrorNotice error={action.error} />
             <Button type="submit" variant="primary" busy={action.pending}>

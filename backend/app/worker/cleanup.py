@@ -50,6 +50,9 @@ class Cleaner:
         now = self.w.now()
         with self.w.db.write() as conn:
             self.w.assets.sync_expiry(conn)
+            from app.services.discovery import Discovery
+
+            Discovery(self.w).cleanup(conn)
             cfg = self.w.settings_config(conn)
             expired = [
                 dict(row)

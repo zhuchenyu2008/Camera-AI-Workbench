@@ -112,7 +112,6 @@ function SettingsForm({ settings }: { settings: SettingsDto }) {
     [job, setJob] = useState<string | null>(null),
     [latest, setLatest] = useState<SettingsDto | null>(null);
   const providers = useApi("listProviders", { query: { limit: 100 } }),
-    entities = useApi("listEntities", { query: { limit: 100 } }),
     action = useAction<unknown>();
   const patch = Object.fromEntries(
     Object.entries(draft).filter(
@@ -148,7 +147,8 @@ function SettingsForm({ settings }: { settings: SettingsDto }) {
           <Badge>北京时间</Badge>
         </div>
         <p className="caption muted" style={{ marginTop: 12 }}>
-          采集频率固定为每秒一张，时区固定为北京时间。现场图保留 {settings.config.frame_retention_minutes} 分钟；文字记录永久保留。
+          采集频率固定为每秒一张，时区固定为北京时间。现场图保留{" "}
+          {settings.config.frame_retention_minutes} 分钟；文字记录永久保留。
         </p>
       </Panel>
       <form
@@ -158,7 +158,7 @@ function SettingsForm({ settings }: { settings: SettingsDto }) {
           void action.run([base.revision, patch], () => preflight(patch));
         }}
       >
-        <Panel title="服务用途与主人物">
+        <Panel title="AI 服务用途">
           <div className="form-grid">
             {(["vision_provider_id", "summary_provider_id"] as const).map(
               (key) => (
@@ -194,30 +194,6 @@ function SettingsForm({ settings }: { settings: SettingsDto }) {
                 </Field>
               ),
             )}
-            <Field label="唯一主人物">
-              <select
-                value={draft.primary_subject_id ?? ""}
-                onChange={(e) =>
-                  update("primary_subject_id", e.target.value || null)
-                }
-              >
-                <option value="">未指定</option>
-                {entities.data?.data
-                  .filter((e) => e.kind === "person")
-                  .map((e) => (
-                    <option
-                      key={e.id}
-                      value={e.id}
-                      disabled={
-                        !e.enabled || !e.references.some((r) => r.enabled)
-                      }
-                    >
-                      {e.name}
-                      {!e.enabled ? "（尚未启用）" : ""}
-                    </option>
-                  ))}
-              </select>
-            </Field>
           </div>
         </Panel>
         {groups.map((group) => (
@@ -325,10 +301,25 @@ function SettingsForm({ settings }: { settings: SettingsDto }) {
             )}
           </Panel>
         ))}
-        <Panel title="允许的活动标签">
+        <Panel title="自动人物与物品档案">
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={draft.auto_discovery_enabled ?? true}
+              onChange={(e) =>
+                update("auto_discovery_enabled", e.target.checked)
+              }
+            />
+            随画面分析自动建档并保存代表图
+          </label>
+          <p className="caption muted">
+            自动记录人物和活动相关物品，之后可改名、合并或拆分。关闭后仍正常记录活动，已有档案继续保留。
+          </p>
+        </Panel>
+        <Panel title="附加活动标签（可选）">
           <Field
             label="标签词表"
-            hint="每行一个，最多 100 项；模型仅可使用此词表。"
+            hint="留空时由模型自由生成。每行一个，填写后仅限制附加标签，不限制活动名称。"
           >
             <textarea
               name="activity_labels"

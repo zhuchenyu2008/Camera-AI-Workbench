@@ -19,6 +19,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("migrate")
     commands.add_parser("check-config")
+    commands.add_parser("repair-activities")
     admin = commands.add_parser("create-admin")
     admin.add_argument("--username", default="admin")
     key = commands.add_parser("init-key")
@@ -67,6 +68,10 @@ def main():
                 parser.error("两次密码不一致")
             w.auth.create_admin(args.username, password)
             print("唯一管理员已创建")
+        elif args.command == "repair-activities":
+            from app.activities.repair import repair_history
+
+            print(json.dumps(repair_history(w), ensure_ascii=False))
         elif args.command == "check-config":
             if config.master_key_file.resolve().is_relative_to(Path(__file__).resolve().parents[2]):
                 parser.error("主密钥必须在仓库外")
@@ -88,7 +93,7 @@ def main():
             print(
                 json.dumps(
                     {
-                        "schema": "0004",
+                        "schema": "0005",
                         "sqlite": sqlite3.sqlite_version,
                         "timezone": "Asia/Shanghai",
                         "master_key": "readable",

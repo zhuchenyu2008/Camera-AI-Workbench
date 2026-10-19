@@ -3,9 +3,9 @@
 import json
 import time
 
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import BigInteger, Column, Integer, JSON, String
+from alembic import op
+from sqlalchemy import JSON, Column, Integer, String
 
 from app.repositories.schema_v4 import exchange_rates, provider_pricing
 

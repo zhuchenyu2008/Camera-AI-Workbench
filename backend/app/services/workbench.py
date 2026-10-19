@@ -469,10 +469,6 @@ class Workbench:
         for provider_id in {cfg.vision_provider_id, cfg.summary_provider_id} - {None}:
             p = one(conn, s.providers, provider_id)
             self.require_provider(p)
-        if cfg.primary_subject_id:
-            entity = one(conn, s.entities, cfg.primary_subject_id)
-            if entity["kind"] != "person" or not entity["enabled"]:
-                raise AppError(422, "VALIDATION_ERROR", "主人物须为已启用人物")
 
     @staticmethod
     def require_provider(provider):
@@ -734,9 +730,11 @@ class Workbench:
 
     def provider_pricing(self, conn, provider_id: str) -> dict:
         provider = one(conn, s.providers, provider_id)
-        row = conn.execute(
-            select(s.provider_pricing).where(s.provider_pricing.c.provider_id == provider_id)
-        ).mappings().first()
+        row = (
+            conn.execute(select(s.provider_pricing).where(s.provider_pricing.c.provider_id == provider_id))
+            .mappings()
+            .first()
+        )
         if not row:
             now = self.now()
             pricing_id = new_id("pricing")
@@ -749,16 +747,16 @@ class Workbench:
                     updated_at_ms=now,
                 )
             )
-            row = conn.execute(
-                select(s.provider_pricing).where(s.provider_pricing.c.id == pricing_id)
-            ).mappings().one()
+            row = (
+                conn.execute(select(s.provider_pricing).where(s.provider_pricing.c.id == pricing_id))
+                .mappings()
+                .one()
+            )
 
         cfg = provider["config_json"]
         is_configured = bool(row["currency"] and row["input_price"] and row["output_price"])
         applicable = bool(
-            is_configured
-            and row["base_url"] == cfg["base_url"]
-            and row["model"] == cfg["model"]
+            is_configured and row["base_url"] == cfg["base_url"] and row["model"] == cfg["model"]
         )
         return dict(
             provider_id=provider_id,
@@ -772,7 +770,9 @@ class Workbench:
                 output_price=row["output_price"],
                 cached_input_price=row["cached_input_price"],
                 source_note=row["source_note"],
-            ) if is_configured else None,
+            )
+            if is_configured
+            else None,
             bound_base_url=row["base_url"],
             bound_model=row["model"],
             updated_at=iso(row["updated_at_ms"]),
@@ -787,9 +787,11 @@ class Workbench:
                 "模型服务配置版本已变化，请刷新后重试",
                 details={"provider_revision": provider["revision"]},
             )
-        row = conn.execute(
-            select(s.provider_pricing).where(s.provider_pricing.c.provider_id == provider_id)
-        ).mappings().first()
+        row = (
+            conn.execute(select(s.provider_pricing).where(s.provider_pricing.c.provider_id == provider_id))
+            .mappings()
+            .first()
+        )
         if not row:
             now = self.now()
             pricing_id = new_id("pricing")
@@ -802,9 +804,11 @@ class Workbench:
                     updated_at_ms=now,
                 )
             )
-            row = conn.execute(
-                select(s.provider_pricing).where(s.provider_pricing.c.id == pricing_id)
-            ).mappings().one()
+            row = (
+                conn.execute(select(s.provider_pricing).where(s.provider_pricing.c.id == pricing_id))
+                .mappings()
+                .one()
+            )
 
         require_revision(row, header)
         now = self.now()
@@ -844,11 +848,14 @@ class Workbench:
                 )
             )
             if dto.currency == "USD":
-                rate_row = conn.execute(
-                    select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny")
-                ).mappings().first()
+                rate_row = (
+                    conn.execute(select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny"))
+                    .mappings()
+                    .first()
+                )
                 if not rate_row or not self.is_rate_valid(rate_row["rate_date"]):
                     from app.worker.queue import enqueue
+
                     enqueue(
                         conn,
                         now,
@@ -866,9 +873,11 @@ class Workbench:
         return count > 0
 
     def has_valid_rate(self, conn) -> bool:
-        row = conn.execute(
-            select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny")
-        ).mappings().first()
+        row = (
+            conn.execute(select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny"))
+            .mappings()
+            .first()
+        )
         return bool(row and self.is_rate_valid(row["rate_date"]))
 
     def is_rate_valid(self, rate_date_str: str | None) -> bool:
@@ -876,7 +885,9 @@ class Workbench:
             return False
         try:
             from datetime import date, datetime
+
             from app.timeutils import BEIJING
+
             rate_d = date.fromisoformat(rate_date_str)
             curr_d = datetime.fromtimestamp(self.now() / 1000, BEIJING).date()
             diff = (curr_d - rate_d).days

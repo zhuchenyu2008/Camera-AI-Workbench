@@ -80,7 +80,7 @@ export function CameraPreview({ camera }: { camera: CameraDto }) {
       <div className="preview-bottom">
         <div>
           <strong>{camera.name}</strong>
-          <span className="caption muted">画面机位独立于统计范围</span>
+          <span className="caption muted">当前画面机位</span>
         </div>
         <div className="actions">
           <Button

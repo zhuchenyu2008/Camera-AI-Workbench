@@ -17,8 +17,10 @@ import {
   PageHeading,
   Panel,
   QueryState,
+  ScopeLink,
 } from "../../shared/components";
 import { ProtectedImage } from "../../shared/media/EphemeralImage";
+import { dateTime, localDate } from "../../shared/time";
 
 export function EntityDetail() {
   const { entityId = "" } = useParams();
@@ -27,7 +29,7 @@ export function EntityDetail() {
     <>
       <BackLink to="/entities" label="返回人物与物品" />
       <QueryState query={q}>
-        {({ data: e }) => <EntityForm entity={e} />}
+        {({ data: e }) => <EntityForm key={e.id} entity={e} />}
       </QueryState>
     </>
   );
@@ -41,7 +43,6 @@ function EntityForm({ entity }: { entity: EntityDto }) {
     [description, setDescription] = useState(entity.description),
     [cameraIds, setCameraIds] = useState(entity.camera_ids),
     [enabled, setEnabled] = useState(entity.enabled),
-    [primary, setPrimary] = useState(entity.is_primary_subject),
     [upload, setUpload] = useState(false),
     [deleting, setDeleting] = useState(false),
     [job, setJob] = useState<string | null>(null),
@@ -53,7 +54,6 @@ function EntityForm({ entity }: { entity: EntityDto }) {
     description,
     camera_ids: cameraIds,
     enabled,
-    is_primary_subject: primary,
   };
   const dirty =
     JSON.stringify(patch) !==
@@ -62,7 +62,6 @@ function EntityForm({ entity }: { entity: EntityDto }) {
       description: base.description,
       camera_ids: base.camera_ids,
       enabled: base.enabled,
-      is_primary_subject: base.is_primary_subject,
     });
   const blocker = useUnsaved(dirty);
   // Reference mutations increment the entity revision; update baseline only with no unsaved edits.
@@ -73,7 +72,6 @@ function EntityForm({ entity }: { entity: EntityDto }) {
       setDescription(entity.description);
       setCameraIds(entity.camera_ids);
       setEnabled(entity.enabled);
-      setPrimary(entity.is_primary_subject);
     }
   }, [entity.revision]);
   const refresh = () =>
@@ -97,6 +95,14 @@ function EntityForm({ entity }: { entity: EntityDto }) {
           </Badge>
         }
       />
+      {entity.merged_into_id && (
+        <Notice>
+          此档案已合并。
+          <ScopeLink to={`/entities/${entity.merged_into_id}`}>
+            查看合并后的档案
+          </ScopeLink>
+        </Notice>
+      )}
       <div className="detail-columns">
         <div className="stack">
           <Panel title="档案信息">
@@ -166,28 +172,11 @@ function EntityForm({ entity }: { entity: EntityDto }) {
                 />
                 启用此档案
               </label>
-              {base.kind === "person" && (
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={primary}
-                    onChange={(e) => setPrimary(e.target.checked)}
-                  />
-                  设为唯一主人物，更新默认统计范围
-                </label>
+              {!entity.references.some((r) => r.enabled) && (
+                <p className="caption muted">
+                  暂缺代表图，活动记录正常。可手动补图，自动档案也会在后续画面中尝试补图。
+                </p>
               )}
-              {primary &&
-                settings.data?.data.config.primary_subject_id !== base.id && (
-                  <Notice tone="warning">
-                    保存后将替换当前主人物；已有历史人物 ID 与名称快照保留。
-                  </Notice>
-                )}
-              {(enabled || primary) &&
-                !entity.references.some((r) => r.enabled) && (
-                  <Notice tone="warning">
-                    请先上传并启用至少一张参考图；没有参考图的档案不能宣称已具备识别资料。
-                  </Notice>
-                )}
               <ErrorNotice error={action.error} />
               {action.error instanceof ApiError &&
                 action.error.status === 412 && (
@@ -289,7 +278,7 @@ function EntityForm({ entity }: { entity: EntityDto }) {
               </div>
             </dl>
             <p className="caption muted">
-              实际可用上限受当前服务验证能力、现场图预留与请求体上限共同约束；启用时由后端校验，不静默减图。
+              实际可用上限受当前服务验证能力、现场图预留与请求体上限共同约束；后端按相关性选取代表图，档案不会因模型容量不足而阻断活动分析。
             </p>
             {limit && (
               <details className="diagnostic">
@@ -312,6 +301,7 @@ function EntityForm({ entity }: { entity: EntityDto }) {
           </div>
         </div>
       </div>
+      <EntityAssociations entity={entity} onChanged={refresh} />
       {upload && (
         <UploadReference
           entity={entity}
@@ -326,12 +316,7 @@ function EntityForm({ entity }: { entity: EntityDto }) {
         <Confirm
           title={`删除「${base.name}」？`}
           description={
-            <p>
-              将撤销此档案参考图的后续读取；历史记录保留名称和版本。
-              {base.is_primary_subject
-                ? "主人物会改为未指定，不会自动指定其他人物。"
-                : ""}
-            </p>
+            <p>将撤销此档案参考图的后续读取；历史记录保留名称和版本。</p>
           }
           onClose={() => setDeleting(false)}
           error={action.error}
@@ -695,5 +680,203 @@ function UploadReference({
         </Button>
       </form>
     </Modal>
+  );
+}
+
+function EntityAssociations({
+  entity,
+  onChanged,
+}: {
+  entity: EntityDto;
+  onChanged: () => unknown;
+}) {
+  const navigate = useNavigate();
+  const [cursor, setCursor] = useState<string | undefined>(),
+    [selected, setSelected] = useState<string[]>([]),
+    [target, setTarget] = useState(""),
+    [mode, setMode] = useState<"merge" | "split" | null>(null),
+    [name, setName] = useState("");
+  const occurrences = useApi("listEntityOccurrences", {
+    path: { entity_id: entity.id },
+    query: { limit: 30, cursor },
+  });
+  const entities = useApi("listEntities", {
+    query: { kind: entity.kind, limit: 100 },
+  });
+  const action = useAction<unknown>();
+  const other = entities.data?.data.find((e) => e.id === target);
+  const submit = async () => {
+    await action.run(
+      [mode, entity.revision, target, selected, name],
+      async (key) => {
+        const result =
+          mode === "merge" && other
+            ? await api("mergeEntity", {
+                path: { entity_id: entity.id },
+                revision: entity.revision,
+                intent: key,
+                body: {
+                  target_entity_id: other.id,
+                  target_revision: other.revision,
+                },
+              })
+            : await api("splitEntity", {
+                path: { entity_id: entity.id },
+                revision: entity.revision,
+                intent: key,
+                body: { name: name.trim(), occurrence_ids: selected },
+              });
+        await invalidate(
+          "getEntity",
+          "listEntities",
+          "listEntityOccurrences",
+          "getOverview",
+          "getTimeline",
+          "listEvents",
+          "getEvent",
+          "listMinutes",
+          "getMinute",
+          "listSummaries",
+          "getSummary",
+        );
+        onChanged();
+        setMode(null);
+        setSelected([]);
+        navigate(`/entities/${result.data.id}`);
+      },
+    );
+  };
+  if (entity.merged_into_id) return null;
+  return (
+    <Panel title="出现记录与关联修订">
+      <p className="caption muted">
+        名字和特征可在上方修改。合并保留目标档案名称；误认的出现记录可以拆为另一档案，活动时长不因未命名而丢失。
+      </p>
+      <div className="row-wrap">
+        <label className="inline-field">
+          合并到
+          <select
+            aria-label="合并到"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+          >
+            <option value="">选择同类型档案</option>
+            {entities.data?.data
+              .filter((e) => e.id !== entity.id)
+              .map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <Button disabled={!other} onClick={() => setMode("merge")}>
+          合并档案
+        </Button>
+      </div>
+      <QueryState query={occurrences}>
+        {({ data, page }) => (
+          <div className="stack">
+            {data.length === 0 && (
+              <p className="muted">
+                尚无自动出现记录；定期画面分析后会逐步补充。
+              </p>
+            )}
+            {data.map((o) => (
+              <label className="check-row" key={o.id}>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(o.id)}
+                  onChange={(e) =>
+                    setSelected(
+                      e.target.checked
+                        ? [...selected, o.id]
+                        : selected.filter((id) => id !== o.id),
+                    )
+                  }
+                />
+                {dateTime(o.captured_at)} · {o.manual ? "人工修订" : "自动关联"}
+                <ScopeLink
+                  className="text-link"
+                  to={`/minutes?date=${localDate(o.captured_at)}&camera_id=${encodeURIComponent(o.camera_id)}`}
+                >
+                  查看记录
+                </ScopeLink>
+              </label>
+            ))}
+            <div className="row-wrap">
+              <Button
+                disabled={!selected.length}
+                onClick={() => {
+                  setName(
+                    `${entity.kind === "person" ? "人物" : "物品"}（拆分）`,
+                  );
+                  setMode("split");
+                }}
+              >
+                将所选 {selected.length} 次出现拆为新档案
+              </Button>
+              {page.has_more && (
+                <Button
+                  onClick={() => {
+                    setCursor(page.next_cursor ?? undefined);
+                    setSelected([]);
+                  }}
+                >
+                  下一页
+                </Button>
+              )}
+              {cursor && (
+                <Button
+                  onClick={() => {
+                    setCursor(undefined);
+                    setSelected([]);
+                  }}
+                >
+                  返回最新
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+      </QueryState>
+      {mode && (
+        <Modal
+          title={
+            mode === "merge"
+              ? `将「${entity.name}」合并到「${other?.name}」`
+              : "拆分所选出现记录"
+          }
+          onClose={() => setMode(null)}
+        >
+          <div className="stack">
+            {mode === "split" ? (
+              <Field label="新档案名称">
+                <input
+                  required
+                  maxLength={64}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </Field>
+            ) : (
+              <p>目标名称和已有历史版本会保留。此操作会更新当前关联记录。</p>
+            )}
+            <ErrorNotice error={action.error} />
+            <div className="actions end">
+              <Button onClick={() => setMode(null)}>取消</Button>
+              <Button
+                variant="primary"
+                busy={action.pending}
+                disabled={mode === "split" && !name.trim()}
+                onClick={() => void submit()}
+              >
+                确认{mode === "merge" ? "合并" : "拆分"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </Panel>
   );
 }

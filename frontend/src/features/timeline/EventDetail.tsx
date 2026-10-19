@@ -8,7 +8,7 @@ import type {
   EventDto,
   EventUpdateDto,
 } from "../../api/generated/types";
-import { activities, evidenceLabels } from "../../shared/labels";
+import { activities, activityLabel, evidenceLabels } from "../../shared/labels";
 import { useAction } from "../../shared/hooks";
 import {
   BackLink,
@@ -28,12 +28,7 @@ import {
   useScope,
   JobProgress,
 } from "../../shared/components";
-import {
-  beijingInput,
-  clock,
-  duration,
-  toInput,
-} from "../../shared/time";
+import { beijingInput, clock, duration, toInput } from "../../shared/time";
 import { EvidenceViewer } from "../../shared/media/EvidenceViewer";
 import { AnalysisDialog } from "../analysis/AnalysisDialog";
 
@@ -98,7 +93,7 @@ export function EventDetail() {
             <>
               <PageHeading
                 kicker="ACTIVITY / EVIDENCE"
-                title={activities[e.activity]}
+                title={activityLabel(e.activity)}
                 description={`${clock(e.start_at, true)}—${clock(e.end_at, true)} · ${duration(e.duration_ms)} · 北京时间`}
                 action={<RevisionPicker current={e.revision} />}
               />
@@ -108,7 +103,7 @@ export function EventDetail() {
                 stale={e.source_state === "stale"}
                 onCurrent={() => scope.update("revision", "")}
               />
-              {e.identity_status !== "matched" && (
+              {e.identity_status === "possible" && (
                 <Notice tone="warning">
                   {e.identity_status === "possible"
                     ? "人物可能匹配"
@@ -396,7 +391,7 @@ function CorrectionEditor({
             会更新相关分钟视图、事件和汇总。只能修订已有画面支持的范围；采集缺口与计划外区域仍由后端排除。
           </Notice>
           <p className="caption muted">
-            原记录：{activities[baseline.activity]} ·{" "}
+            原记录：{activityLabel(baseline.activity)} ·{" "}
             {clock(baseline.start_at, true)}—{clock(baseline.end_at, true)} ·{" "}
             {duration(baseline.duration_ms)} · v{baseline.revision}
           </p>
@@ -469,21 +464,25 @@ function CorrectionEditor({
                   </select>
                 </Field>
                 <Field label="主要活动">
-                  <select
-                    value={r.activity}
+                  <input
+                    list="activity-suggestions"
+                    maxLength={64}
+                    required
+                    value={activityLabel(r.activity)}
                     onChange={(e) =>
                       change(i, {
                         activity: e.target
                           .value as CorrectionInterval["activity"],
                       })
                     }
-                  >
+                  />
+                  <datalist id="activity-suggestions">
                     {Object.entries(activities).map(([k, v]) => (
                       <option key={k} value={k}>
                         {v}
                       </option>
                     ))}
-                  </select>
+                  </datalist>
                 </Field>
                 <Field label="开始（北京时间）">
                   <input
@@ -515,6 +514,23 @@ function CorrectionEditor({
                 {duration(Date.parse(r.end_at) - Date.parse(r.start_at), false)}
                 ；最终有效时长以提交后服务端返回为准。
               </p>
+              {!settings.data?.data.config.activity_labels?.length && (
+                <Field label="附加标签（逗号分隔）">
+                  <input
+                    maxLength={1300}
+                    defaultValue={r.labels?.join("，") ?? ""}
+                    onBlur={(e) =>
+                      change(i, {
+                        labels: e.target.value
+                          .split(/[,，]/)
+                          .map((x) => x.trim())
+                          .filter(Boolean)
+                          .slice(0, 20),
+                      })
+                    }
+                  />
+                </Field>
+              )}
               <div className="row-wrap">
                 {settings.data?.data.config.activity_labels?.map((label) => (
                   <label className="check-row" key={label}>
@@ -553,10 +569,7 @@ function CorrectionEditor({
                   )}
                 </div>
                 {(r.object_ids ?? []).length > 0 && (
-                  <div
-                    className="row-wrap"
-                    style={{ gap: 6, marginBottom: 8 }}
-                  >
+                  <div className="row-wrap" style={{ gap: 6, marginBottom: 8 }}>
                     {(r.object_ids ?? []).map((objId) => {
                       const found = allEntities.find((x) => x.id === objId);
                       const displayName = found ? found.name : objId;
@@ -614,9 +627,13 @@ function CorrectionEditor({
                       const targetEntity = allEntities.find(
                         (x) => x.id === selectedId,
                       );
-                      if (targetEntity && targetEntity.kind !== "object") return;
+                      if (targetEntity && targetEntity.kind !== "object")
+                        return;
                       const current = r.object_ids ?? [];
-                      if (current.length < 32 && !current.includes(selectedId)) {
+                      if (
+                        current.length < 32 &&
+                        !current.includes(selectedId)
+                      ) {
                         change(i, { object_ids: [...current, selectedId] });
                       }
                     }}
@@ -678,14 +695,14 @@ function CorrectionEditor({
                 <div>
                   <strong>草稿基线 v{baseline.revision}</strong>
                   <p>
-                    {activities[baseline.activity]} ·{" "}
+                    {activityLabel(baseline.activity)} ·{" "}
                     {duration(baseline.duration_ms)}
                   </p>
                 </div>
                 <div>
                   <strong>服务器 v{latest.revision}</strong>
                   <p>
-                    {activities[latest.activity]} ·{" "}
+                    {activityLabel(latest.activity)} ·{" "}
                     {duration(latest.duration_ms)}
                   </p>
                   <p>

@@ -32,6 +32,7 @@ import { useApi, queryClient, stopPolling } from "../api/query";
 import { ApiError, sessionEvents, setCsrf } from "../api/client";
 import {
   ErrorNotice,
+  Notice,
   PageHeading,
   QueryState,
   ScopeLink,
@@ -159,6 +160,7 @@ function Protected() {
   return <QueryState query={query}>{() => <Shell />}</QueryState>;
 }
 function Shell() {
+  const health = useApi("getHealth");
   const location = useLocation();
   const active = (path: string) =>
     path === "/"
@@ -247,6 +249,13 @@ function Shell() {
           </ScopeLink>
         </header>
         <main id="main-content" className="main-content">
+          {health.isSuccess &&
+            (health.data.api_version !== "2.0" ||
+              health.data.database_schema !== "0005") && (
+              <Notice tone="warning">
+                后台仍是旧版本，请使用启动脚本统一重启工作台并完成数据库升级；旧后台可能缺少汇率、模型价格等接口。
+              </Notice>
+            )}
           <Suspense fallback={<Skeleton lines={6} />}>
             <div className="route-content" key={location.pathname}>
               <Outlet />

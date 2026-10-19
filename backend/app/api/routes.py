@@ -26,14 +26,19 @@ from app.schemas import (
     Crop,
     EntityCreate,
     EntityDto,
+    EntityMerge,
+    EntityOccurrenceDto,
     EntityPatch,
+    EntitySplit,
     Envelope,
     EventCorrection,
     EventDto,
+    EventSummaryDto,
     EventUpdateDto,
     EvidenceDto,
     ExchangeRateDto,
     ExchangeRateRefreshDto,
+    HealthDto,
     ImpactPreviewDto,
     JobDto,
     ListEnvelope,
@@ -74,9 +79,11 @@ router = APIRouter()
 Limit = Annotated[int, Query(ge=1, le=100)]
 
 
-@router.get("/health/live", operation_id="getHealth")
+@router.get("/health/live", operation_id="getHealth", response_model=HealthDto)
 def health():
-    return {"alive": True}
+    from app.repositories.db import SCHEMA_VERSION
+
+    return {"alive": True, "api_version": "2.0", "database_schema": SCHEMA_VERSION}
 
 
 @router.post("/api/session", operation_id="login", response_model=Envelope[SessionDto])
@@ -394,9 +401,9 @@ def overview(
         return respond(request, result)
 
 
-def event_rows(w, conn, a, b, scope, activity, limit=100):
+def event_rows(w, conn, a, b, scope, activity, limit=100, *, refs_only=False):
     stmt = (
-        select(s.events.c.id)
+        select(s.events.c.id, s.events.c.current_revision)
         .join(
             s.event_revisions,
             and_(
@@ -414,18 +421,20 @@ def event_rows(w, conn, a, b, scope, activity, limit=100):
         stmt = stmt.where(s.event_revisions.c.summary_json["activity"].as_string() == activity)
     if scope["subject_id"]:
         stmt = stmt.where(s.event_revisions.c.summary_json["subject_id"].as_string() == scope["subject_id"])
-    result = []
-    for row in conn.execute(
-        stmt.order_by(s.event_revisions.c.summary_json["start_at"].as_string().desc(), s.events.c.id).limit(
-            limit * 10
+    from sqlalchemy import exists
+
+    member = func.json_each(s.event_revisions.c.summary_json, "$.camera_ids").table_valued("value")
+    stmt = stmt.where(exists(select(1).select_from(member).where(member.c.value.in_(scope["camera_ids"]))))
+    rows = list(
+        conn.execute(
+            stmt.order_by(
+                s.event_revisions.c.summary_json["start_at"].as_string().desc(), s.events.c.id
+            ).limit(limit)
         )
-    ):
-        event = w.ledger.event(conn, row.id)
-        if set(scope["camera_ids"]) & set(event["camera_ids"]):
-            result.append(event)
-            if len(result) >= limit:
-                break
-    return result
+    )
+    if refs_only:
+        return [{"id": r.id, "revision": r.current_revision} for r in rows]
+    return w.ledger.event_summaries(conn, [r.id for r in rows])
 
 
 @router.get("/api/timeline", operation_id="getTimeline", response_model=Envelope[TimelineDto])
@@ -449,9 +458,10 @@ def timeline(
     buckets = []
     with w.db.read() as conn:
         scope = w.ledger.scope(conn, camera_ids, subject_id, a, b)
+        source = w.ledger.load_range(conn, a, b, scope)
         for start in range(a, b, bucket_seconds * 1000):
             end = min(b, start + bucket_seconds * 1000)
-            result = w.ledger.calculate(conn, start, end, scope)
+            result = w.ledger.calculate(conn, start, end, scope, data=source)
             buckets.append(
                 {
                     "start_at": iso(start),
@@ -460,7 +470,7 @@ def timeline(
                     "activities": result["activities"],
                 }
             )
-        events = event_rows(w, conn, a, b, scope, None, 101)
+        events = event_rows(w, conn, a, b, scope, None, 101, refs_only=True)
         return respond(
             request,
             {
@@ -476,7 +486,7 @@ def timeline(
         )
 
 
-@router.get("/api/events", operation_id="listEvents", response_model=ListEnvelope[EventDto])
+@router.get("/api/events", operation_id="listEvents", response_model=ListEnvelope[EventSummaryDto])
 def events(
     request: Request,
     from_: str = Query(alias="from"),
@@ -541,11 +551,7 @@ def events(
             cursor=cursor,
             descending=True,
         )
-        data = []
-        for row in rows:
-            event = w.ledger.event(conn, row["id"])
-            event["segments"] = event["segments"][:3]
-            data.append(event)
+        data = w.ledger.event_summaries(conn, [row["id"] for row in rows])
         return respond(request, data, page=page)
 
 
@@ -603,7 +609,7 @@ def minutes(
             limit=limit,
             cursor=cursor,
         )
-        return respond(request, [Records(w).minute(conn, r["id"], compact=True) for r in rows], page=page)
+        return respond(request, Records(w).list_minutes(conn, rows), page=page)
 
 
 @router.get("/api/minutes/{minute_id}", operation_id="getMinute", response_model=Envelope[MinuteDto])
@@ -814,7 +820,9 @@ def entities(
     cursor: str | None = None,
 ):
     w = request.app.state.workbench
-    stmt = select(s.entities).where(s.entities.c.deleted_at_ms.is_(None))
+    stmt = select(s.entities).where(
+        s.entities.c.deleted_at_ms.is_(None), s.entities.c.merged_into_id.is_(None)
+    )
     if kind:
         stmt = stmt.where(s.entities.c.kind == kind)
     if enabled is not None:
@@ -876,6 +884,77 @@ def update_entity(request: Request, entity_id: str, dto: EntityPatch):
                 conn, entity_id, dto.model_dump(exclude_unset=True), request.headers.get("If-Match")
             ),
         ),
+    )
+
+
+@router.get(
+    "/api/entities/{entity_id}/occurrences",
+    operation_id="listEntityOccurrences",
+    response_model=ListEnvelope[EntityOccurrenceDto],
+)
+def entity_occurrences(request: Request, entity_id: str, limit: Limit = 50, cursor: str | None = None):
+    w = request.app.state.workbench
+    with w.db.read() as conn:
+        one(conn, s.entities, entity_id, deleted=True)
+        rows, page = page_rows(
+            w,
+            conn,
+            select(s.entity_occurrences).where(s.entity_occurrences.c.entity_id == entity_id),
+            s.entity_occurrences.c.captured_at_ms,
+            s.entity_occurrences.c.id,
+            filters={"op": "listEntityOccurrences", "entity_id": entity_id},
+            limit=limit,
+            cursor=cursor,
+            descending=True,
+        )
+        return respond(
+            request,
+            [
+                dict(
+                    id=r["id"],
+                    entity_id=r["entity_id"],
+                    camera_id=r["camera_id"],
+                    captured_at=iso(r["captured_at_ms"]),
+                    evidence_id=r["evidence_id"],
+                    crop=r["crop_json"],
+                    manual=r["manual"],
+                )
+                for r in rows
+            ],
+            page=page,
+        )
+
+
+@router.post(
+    "/api/entities/{entity_id}/merge", operation_id="mergeEntity", response_model=Envelope[EntityDto]
+)
+def merge_entity(request: Request, entity_id: str, dto: EntityMerge):
+    from app.services.discovery import Discovery
+
+    w = request.app.state.workbench
+    return mutation(
+        request,
+        "mergeEntity",
+        dto.model_dump(),
+        lambda conn: (200, Discovery(w).merge(conn, entity_id, dto, request.headers.get("If-Match"))),
+    )
+
+
+@router.post(
+    "/api/entities/{entity_id}/split",
+    operation_id="splitEntity",
+    status_code=201,
+    response_model=Envelope[EntityDto],
+)
+def split_entity(request: Request, entity_id: str, dto: EntitySplit):
+    from app.services.discovery import Discovery
+
+    w = request.app.state.workbench
+    return mutation(
+        request,
+        "splitEntity",
+        dto.model_dump(),
+        lambda conn: (201, Discovery(w).split(conn, entity_id, dto, request.headers.get("If-Match"))),
     )
 
 
@@ -1213,9 +1292,11 @@ def update_provider_pricing(request: Request, provider_id: str, dto: ProviderPri
 def get_exchange_rate(request: Request):
     w = request.app.state.workbench
     with w.db.read() as conn:
-        row = conn.execute(
-            select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny")
-        ).mappings().first()
+        row = (
+            conn.execute(select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny"))
+            .mappings()
+            .first()
+        )
         has_usd = w.has_usd_pricing(conn)
         if not row:
             dto = ExchangeRateDto(
@@ -1256,12 +1337,16 @@ def refresh_exchange_rate(request: Request):
     w = request.app.state.workbench
 
     def apply(conn):
-        active = conn.execute(
-            select(s.jobs).where(
-                s.jobs.c.kind == "exchange_rate_refresh",
-                s.jobs.c.state.in_(["queued", "running"]),
+        active = (
+            conn.execute(
+                select(s.jobs).where(
+                    s.jobs.c.kind == "exchange_rate_refresh",
+                    s.jobs.c.state.in_(["queued", "running"]),
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         if active:
             return 200, ExchangeRateRefreshDto(
                 job_id=active["id"],

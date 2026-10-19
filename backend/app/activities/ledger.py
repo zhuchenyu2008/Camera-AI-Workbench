@@ -4,10 +4,11 @@ from collections import defaultdict
 
 from sqlalchemy import and_, select, update
 
+from app.activities.names import activity_name
 from app.errors import AppError, require_revision
 from app.repositories import schema as s
 from app.repositories.db import new_id, one
-from app.schemas import Coverage
+from app.schemas import Coverage, EventSummaryDto
 from app.security.secrets import canonical, fingerprint
 from app.timeutils import intersect, iso, schedule_intervals, timestamp, union
 from app.worker.queue import enqueue
@@ -23,7 +24,7 @@ def segment_dto(row: dict) -> dict:
         id=row["id"],
         subject_id=row["subject_id"],
         identity_status=row["identity_status"],
-        activity=row["activity"],
+        activity=activity_name(row["activity"]),
         labels=details.get("labels", []),
         object_ids=details.get("object_ids", []),
         start_at=iso(row["start_at_ms"]),
@@ -55,6 +56,9 @@ class Ledger:
 
     def scope(self, conn, camera_ids: list[str] | None, subject_id: str | None, start: int, end: int) -> dict:
         if subject_id:
+            from app.services.discovery import Discovery
+
+            subject_id = Discovery(self.w).resolve(conn, subject_id)
             entity = one(conn, s.entities, subject_id, deleted=True)
             if entity["kind"] != "person":
                 raise AppError(422, "VALIDATION_ERROR", "subject_id 必须为人物")
@@ -136,12 +140,10 @@ class Ledger:
         )
         return [dict(row) for row in rows]
 
-    def calculate(self, conn, start: int, end: int, scope: dict, spans_override=None) -> dict:
+    def load_range(self, conn, start, end, scope):
         planned = {c: self.planned(conn, c, start, end) for c in scope["camera_ids"]}
         captured = {c: intersect(planned[c], self.captured(conn, c, start, end)) for c in planned}
-        spans = (
-            self.spans(conn, scope["camera_ids"], start, end) if spans_override is None else spans_override
-        )
+        spans = self.spans(conn, scope["camera_ids"], start, end)
         minutes = (
             conn.execute(
                 select(s.minute_records, s.minute_revisions.c.result_json)
@@ -161,6 +163,21 @@ class Ledger:
             .mappings()
             .all()
         )
+        return dict(
+            planned=planned, captured=captured, spans=spans, minutes=minutes, revision=self.revision(conn)
+        )
+
+    def calculate(self, conn, start: int, end: int, scope: dict, spans_override=None, data=None) -> dict:
+        data = data or self.load_range(conn, start, end, scope)
+        planned = {c: intersect(v, [(start, end)]) for c, v in data["planned"].items()}
+        captured = {c: intersect(v, [(start, end)]) for c, v in data["captured"].items()}
+        spans = data["spans"] if spans_override is None else spans_override
+        spans = [
+            r | {"activity": activity_name(r["activity"])}
+            for r in spans
+            if r["start_at_ms"] < end and r["end_at_ms"] > start
+        ]
+        minutes = [r for r in data["minutes"] if r["start_at_ms"] < end and r["start_at_ms"] + 60000 > start]
         # 扫描区间端点，避免对长范围逐帧累计，也避免跨机位重复计算。
         changes: dict[int, list] = defaultdict(list)
         for camera, intervals in planned.items():
@@ -214,7 +231,7 @@ class Ledger:
                     r
                     for r in candidates
                     if (subject is None or r["subject_id"] == subject)
-                    and (r["identity_status"] == "matched" or (subject is None and r["origin"] == "manual"))
+                    and (subject is None or r["identity_status"] == "matched")
                 ]
                 if any(r["origin"] == "manual" for r in matched):
                     matched = [r for r in matched if r["origin"] == "manual"]
@@ -302,11 +319,11 @@ class Ledger:
             coverage=coverage,
             activities=[{"activity": a, "duration_ms": d} for a, d in sorted(activities.items())],
             duration_is_estimated=True,
-            projection_revision=self.revision(conn),
+            projection_revision=data["revision"],
             slices=slices,
         )
 
-    def invalidate(self, conn, start: int, end: int):
+    def invalidate(self, conn, start: int, end: int, *, regenerate=True):
         affected = list(
             conn.execute(
                 select(s.summaries).where(s.summaries.c.start_at_ms < end, s.summaries.c.end_at_ms > start)
@@ -316,6 +333,8 @@ class Ledger:
             conn.execute(
                 update(s.summaries).where(s.summaries.c.id == summary["id"]).values(source_state="stale")
             )
+            if not regenerate:
+                continue
             existing = (
                 conn.execute(
                     select(s.jobs).where(
@@ -379,11 +398,15 @@ class Ledger:
         projected = []
         by_subject = defaultdict(list)
         for span in spans:
-            by_subject[span["subject_id"]].append(span)
-        for subject, source_spans in by_subject.items():
+            by_subject[
+                (span["subject_id"], span["camera_id"] if span["subject_id"] is None else None)
+            ].append(span)
+        for (subject, camera), source_spans in by_subject.items():
             lo = min(r["start_at_ms"] for r in source_spans)
             hi = max(r["end_at_ms"] for r in source_spans)
-            slices = self.calculate(conn, lo, hi, {"camera_ids": ids, "subject_id": subject})["slices"]
+            slices = self.calculate(
+                conn, lo, hi, {"camera_ids": [camera] if camera else ids, "subject_id": subject}
+            )["slices"]
             for span in source_spans:
                 for item in slices:
                     a = max(item["start"], span["start_at_ms"])
@@ -407,9 +430,16 @@ class Ledger:
         spans = projected
         groups = defaultdict(list)
         for span in spans:
-            groups[(span["subject_id"], span["activity"], span["identity_status"])].append(span)
+            groups[
+                (
+                    span["subject_id"],
+                    activity_name(span["activity"]),
+                    span["identity_status"],
+                    span["camera_id"] if span["subject_id"] is None else None,
+                )
+            ].append(span)
         used = set()
-        for (subject, activity, identity), group in groups.items():
+        for (subject, activity, identity, _camera), group in groups.items():
             clusters = []
             for span in sorted(group, key=lambda r: (r["start_at_ms"], r["id"])):
                 if clusters and span["start_at_ms"] <= max(r["end_at_ms"] for r in clusters[-1]) + merge_gap:
@@ -503,6 +533,9 @@ class Ledger:
                         created_at_ms=self.w.now(),
                     )
                 )
+                self.w.assets.keep_evidence(
+                    conn, [e for r in cluster for e in r["evidence_ids_json"]], "event", event_id, rev
+                )
         # 保留旧入口并标注替代事件。只变动有效入口指针，不改写旧版本。
         for old in conn.execute(select(s.events)).mappings().all():
             if old["id"] in used:
@@ -559,12 +592,11 @@ class Ledger:
             )
 
     def evidence_state(self, conn, ids):
-        states = []
-        for evidence_id in set(ids):
-            try:
-                states.append(self.w.assets.metadata(conn, evidence_id)["state"])
-            except AppError:
-                states.append("missing")
+        return self.combine_evidence_states(ids, self.w.assets.metadata_many(conn, ids))
+
+    @staticmethod
+    def combine_evidence_states(ids, metadata):
+        states = [metadata.get(e, {"state": "missing"})["state"] for e in set(ids)]
         if not states:
             return "none"
         if all(s == "available" for s in states):
@@ -572,6 +604,45 @@ class Ledger:
         if "available" in states:
             return "partial"
         return "evicted" if "evicted" in states else "missing" if "missing" in states else "expired"
+
+    def event_summaries(self, conn, event_ids):
+        if not event_ids:
+            return []
+        fields = [k for k in EventSummaryDto.model_fields if k != "evidence_state"]
+        rows = list(
+            conn.execute(
+                select(*[s.event_revisions.c.summary_json[k].label(k) for k in fields])
+                .join(
+                    s.events,
+                    and_(
+                        s.events.c.id == s.event_revisions.c.event_id,
+                        s.events.c.current_revision == s.event_revisions.c.revision,
+                    ),
+                )
+                .where(s.events.c.id.in_(event_ids))
+            ).mappings()
+        )
+        links = defaultdict(list)
+        for owner, evidence_id in conn.execute(
+            select(s.revision_evidence_links.c.owner_id, s.revision_evidence_links.c.evidence_id)
+            .join(
+                s.events,
+                and_(
+                    s.events.c.id == s.revision_evidence_links.c.owner_id,
+                    s.events.c.current_revision == s.revision_evidence_links.c.owner_revision,
+                ),
+            )
+            .where(s.revision_evidence_links.c.owner_kind == "event", s.events.c.id.in_(event_ids))
+        ):
+            links[owner].append(evidence_id)
+        metadata = self.w.assets.metadata_many(conn, [e for values in links.values() for e in values])
+        result = {
+            r["id"]: dict(r) | {"evidence_state": self.combine_evidence_states(links[r["id"]], metadata)}
+            for r in rows
+        }
+        for item in result.values():
+            item["has_manual_revision"] = bool(item["has_manual_revision"])
+        return [result[i] for i in event_ids if i in result]
 
     def event(self, conn, event_id: str, revision=None, refresh_evidence=True):
         event = one(conn, s.events, event_id)
@@ -759,7 +830,7 @@ class Ledger:
                             minute_revision=next_revision,
                             start_at_ms=lo,
                             end_at_ms=hi,
-                            activity=matching.activity if matching else "unknown",
+                            activity=activity_name(matching.activity) if matching else "unknown",
                             origin="manual",
                             support="mixed",
                             boundary_json={},

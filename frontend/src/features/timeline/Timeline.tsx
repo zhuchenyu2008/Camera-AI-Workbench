@@ -50,7 +50,10 @@ export function Timeline() {
         ...range,
         activity: scope.search.get("activity"),
         identity_status: (scope.search.get("identity_status") || undefined) as
-          "matched" | "possible" | "unknown" | undefined,
+          | "matched"
+          | "possible"
+          | "unknown"
+          | undefined,
         subject_id: scope.search.has("identity_status")
           ? undefined
           : range.subject_id,
@@ -150,11 +153,20 @@ export function Timeline() {
                 onChange={(e) => scope.update("activity", e.target.value)}
               >
                 <option value="">全部活动</option>
-                {Object.entries(activities).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
+                {[
+                  ...new Set([
+                    ...Object.keys(activities),
+                    ...(query.data?.data.buckets.flatMap((b) =>
+                      b.activities.map((a) => a.activity),
+                    ) ?? []),
+                  ]),
+                ]
+                  .map((k) => [k, activities[k] ?? k])
+                  .map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v}
+                    </option>
+                  ))}
               </select>
             </label>
           </div>

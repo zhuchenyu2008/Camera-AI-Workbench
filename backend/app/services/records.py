@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
 from app.activities.ledger import segment_dto
 from app.errors import AppError
@@ -12,6 +12,116 @@ from app.timeutils import iso
 class Records:
     def __init__(self, workbench):
         self.w = workbench
+
+    def list_minutes(self, conn, rows):
+        if not rows:
+            return []
+        ids = [r["id"] for r in rows]
+        cameras = sorted({r["camera_id"] for r in rows})
+        source = self.w.ledger.load_range(
+            conn,
+            min(r["start_at_ms"] for r in rows),
+            max(r["start_at_ms"] for r in rows) + 60000,
+            {"camera_ids": cameras, "subject_id": None},
+        )
+        versions = {
+            r["minute_id"]: dict(r)
+            for r in conn.execute(
+                select(s.minute_revisions)
+                .join(
+                    s.minute_records,
+                    and_(
+                        s.minute_records.c.id == s.minute_revisions.c.minute_id,
+                        s.minute_records.c.current_revision == s.minute_revisions.c.revision,
+                    ),
+                )
+                .where(s.minute_records.c.id.in_(ids))
+            ).mappings()
+        }
+        captures = {
+            r["minute_id"]: r
+            for r in conn.execute(
+                select(s.minute_capture).where(s.minute_capture.c.minute_id.in_(ids))
+            ).mappings()
+        }
+        metadata = self.w.assets.metadata_many(
+            conn, [e for r in versions.values() for e in r["result_json"].get("evidence_ids", [])]
+        )
+        pending = {}
+        for job in conn.execute(
+            select(s.jobs.c.id, s.jobs.c.payload_json).where(
+                s.jobs.c.kind.in_(["manual_visual", "reconcile_minutes"]),
+                s.jobs.c.state.in_(["queued", "running"]),
+            )
+        ):
+            pending.update({b["id"]: job.id for b in job.payload_json.get("baselines", [])})
+        result = []
+        for minute in rows:
+            camera, start = minute["camera_id"], minute["start_at_ms"]
+            row = versions.get(minute["id"], {})
+            data = row.get("result_json", {})
+            spans = [r for r in source["spans"] if r["minute_id"] == minute["id"]]
+            local = source | {
+                "planned": {camera: source["planned"][camera]},
+                "captured": {camera: source["captured"][camera]},
+                "spans": spans,
+                "minutes": [r for r in source["minutes"] if r["id"] == minute["id"]],
+            }
+            stats = self.w.ledger.calculate(
+                conn, start, start + 60000, {"camera_ids": [camera], "subject_id": None}, data=local
+            )
+            evidence = data.get("evidence_ids", [])
+            samples = []
+            for eid in evidence[:3]:
+                meta = metadata.get(eid)
+                if meta:
+                    samples.append(
+                        dict(
+                            id=eid,
+                            camera_id=meta["camera_id"],
+                            captured_at=iso(meta["captured_at_ms"]),
+                            expires_at=iso(meta["effective_expiry_ms"]),
+                            state=meta["state"],
+                            width=meta["width"],
+                            height=meta["height"],
+                            content_url=f"/api/evidence/{eid}" if meta["state"] == "available" else None,
+                            reason=meta.get("reason"),
+                        )
+                    )
+            capture = captures[minute["id"]]
+            result.append(
+                dict(
+                    id=minute["id"],
+                    camera_id=camera,
+                    start_at=iso(start),
+                    end_at=iso(start + 60000),
+                    revision=minute["current_revision"] or 0,
+                    analysis_state=data.get("analysis_state", minute["analysis_state"]),
+                    analysis_mode=data.get("analysis_mode"),
+                    evidence_state=self.w.ledger.combine_evidence_states(evidence, metadata),
+                    coverage=stats["coverage"],
+                    description=data.get("description", ""),
+                    segments=[
+                        segment_dto(r) for r in sorted(spans, key=lambda r: (r["start_at_ms"], r["id"]))[:3]
+                    ],
+                    evidence_samples=samples,
+                    reference_set_id=row.get("reference_set_id"),
+                    model_version=data.get("model_version"),
+                    has_manual_revision=data.get("has_manual_revision", False),
+                    pending_job_id=pending.get(minute["id"]),
+                    sampling=data.get(
+                        "sampling",
+                        dict(
+                            target_frame_count=capture["planned_bitmap"].bit_count(),
+                            captured_frame_count=capture["captured_bitmap"].bit_count(),
+                            submitted_frame_count=0,
+                            successful_frame_count=0,
+                        ),
+                    ),
+                    versions=[],
+                )
+            )
+        return result
 
     def minute(self, conn, minute_id, revision=None, compact=False):
         minute = one(conn, s.minute_records, minute_id)

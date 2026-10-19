@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { TimelineDto } from "../../api/generated/types";
-import { activities } from "../../shared/labels";
+import { activityLabel, activityStyle } from "../../shared/labels";
 import { clock, duration } from "../../shared/time";
 import { Notice } from "../../shared/components";
 export function TimelineStrip({
@@ -55,30 +55,31 @@ export function TimelineStrip({
           return (
             <button
               key={b.start_at}
-              className={`time-bucket ${dominant} ${i === selected ? "selected" : ""}`}
+              className={`time-bucket ${["gap", "pending", "unknown", "empty"].includes(dominant) ? dominant : "classified"} ${i === selected ? "selected" : ""}`}
               style={{
+                ...(a ? activityStyle(a.activity) : {}),
                 left: `${((Date.parse(b.start_at) - start) / span) * 100}%`,
                 width: `${((Date.parse(b.end_at) - Date.parse(b.start_at)) / span) * 100}%`,
               }}
               onClick={() => setSelected(i === selected ? null : i)}
-              aria-label={`${clock(b.start_at)}—${clock(b.end_at)}，${a ? activities[a.activity] + " " + duration(a.duration_ms) : "尚无已归类活动"}。查看覆盖明细`}
+              aria-label={`${clock(b.start_at)}—${clock(b.end_at)}，${a ? activityLabel(a.activity) + " " + duration(a.duration_ms) : "尚无已归类活动"}。查看覆盖明细`}
             />
           );
         })}
       </div>
       <div className="timeline-key">
-        <span>
-          <i className="swatch reading" />
-          阅读
-        </span>
-        <span>
-          <i className="swatch writing" />
-          书写
-        </span>
-        <span>
-          <i className="swatch computer" />
-          电脑
-        </span>
+        {[
+          ...new Set(
+            timeline.buckets.flatMap((b) =>
+              b.activities.map((a) => a.activity),
+            ),
+          ),
+        ].map((name) => (
+          <span key={name}>
+            <i className="swatch" style={activityStyle(name)} />
+            {activityLabel(name)}
+          </span>
+        ))}
         <span>
           <i className="swatch unknown" />
           无法判断

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import warnings
 
@@ -125,6 +126,42 @@ class Assets:
             reason=reason,
         )
 
+    def metadata_many(self, conn, evidence_ids):
+        """列表路径只批量读取元数据；实际媒体读取仍检查文件和 TTL。"""
+        ids = sorted(set(evidence_ids))
+        if not ids:
+            return {}
+        members = func.json_each(json.dumps(ids)).table_valued("value")
+        rows = {
+            r["evidence_id"]: dict(r) | {"id": r["evidence_id"]}
+            for r in conn.execute(
+                select(s.evidence_refs).where(s.evidence_refs.c.evidence_id.in_(select(members.c.value)))
+            ).mappings()
+        }
+        rows.update(
+            {
+                r["id"]: dict(r)
+                for r in conn.execute(
+                    select(s.frames).where(s.frames.c.id.in_(select(members.c.value)))
+                ).mappings()
+            }
+        )
+        cfg = self.w.settings_config(conn)
+        retention = {
+            r.id: r.config_json.get("retention_minutes") or cfg.frame_retention_minutes
+            for r in conn.execute(select(s.cameras.c.id, s.cameras.c.config_json))
+        }
+        now = self.w.now()
+        for row in rows.values():
+            ttl = retention[row["camera_id"]]
+            if row.get("is_test"):
+                ttl = min(ttl, 10)
+            expiry = min(row["expires_at_ms"], row["captured_at_ms"] + ttl * 60000)
+            if row["state"] == "available" and expiry <= now:
+                row["state"] = "expired"
+            row["effective_expiry_ms"] = expiry
+        return rows
+
     def read_evidence(self, evidence_id: str) -> tuple[bytes, dict]:
         with self.w.db.read() as conn:
             meta = self.metadata(conn, evidence_id)
@@ -191,41 +228,46 @@ class Assets:
                 conn.execute(update(s.evidence_refs).where(*ref_filters).values(expires_at_ms=ref_target))
 
     def keep_evidence(self, conn, evidence_ids: list[str], kind: str, owner_id: str, revision: int):
-        for evidence_id in sorted(set(evidence_ids)):
-            frame = conn.execute(select(s.frames).where(s.frames.c.id == evidence_id)).mappings().first()
-            if frame:
-                values = {
-                    key: frame[key]
-                    for key in (
-                        "camera_id",
-                        "captured_at_ms",
-                        "expires_at_ms",
-                        "state",
-                        "reason",
-                        "width",
-                        "height",
-                        "sha256",
-                    )
-                }
-                conn.execute(
-                    sqlite_insert(s.evidence_refs)
-                    .values(evidence_id=evidence_id, **values)
-                    .on_conflict_do_nothing()
-                )
-            if conn.execute(
-                select(s.evidence_refs.c.evidence_id).where(s.evidence_refs.c.evidence_id == evidence_id)
-            ).first():
-                conn.execute(
-                    sqlite_insert(s.revision_evidence_links)
-                    .values(
-                        owner_kind=kind,
-                        owner_id=owner_id,
-                        owner_revision=revision,
-                        evidence_id=evidence_id,
-                        role="observed",
-                    )
-                    .on_conflict_do_nothing()
-                )
+        ids = sorted(set(evidence_ids))
+        if not ids:
+            return
+        from sqlalchemy import literal
+
+        member = func.json_each(json.dumps(ids)).table_valued("value")
+        keys = [
+            "camera_id",
+            "captured_at_ms",
+            "expires_at_ms",
+            "state",
+            "reason",
+            "width",
+            "height",
+            "sha256",
+        ]
+        conn.execute(
+            sqlite_insert(s.evidence_refs)
+            .from_select(
+                ["evidence_id", *keys],
+                select(s.frames.c.id, *[s.frames.c[k] for k in keys]).where(
+                    s.frames.c.id.in_(select(member.c.value))
+                ),
+            )
+            .on_conflict_do_nothing()
+        )
+        conn.execute(
+            sqlite_insert(s.revision_evidence_links)
+            .from_select(
+                ["owner_kind", "owner_id", "owner_revision", "evidence_id", "role"],
+                select(
+                    literal(kind),
+                    literal(owner_id),
+                    literal(revision),
+                    s.evidence_refs.c.evidence_id,
+                    literal("observed"),
+                ).where(s.evidence_refs.c.evidence_id.in_(select(member.c.value))),
+            )
+            .on_conflict_do_nothing()
+        )
 
     def reference_fingerprint(self, conn):
         return fingerprint(self.members(conn, None))
@@ -239,6 +281,9 @@ class Assets:
                 s.entities.c.kind,
                 s.entities.c.description,
                 s.entities.c.camera_ids_json,
+                s.entities.c.origin,
+                s.entities.c.reviewed,
+                s.entities.c.last_seen_at_ms,
             )
             .join(
                 s.reference_asset_versions,
@@ -274,12 +319,51 @@ class Assets:
                     camera_ids=row["camera_ids_json"],
                     sha256=row["sha256"],
                     bytes=row["bytes"],
+                    origin=row["origin"],
+                    reviewed=row["reviewed"],
+                    last_seen_at_ms=row["last_seen_at_ms"],
                 )
             )
         return result
 
     def reference_set(self, conn, camera_ids: list[str] | None) -> dict:
         members = self.members(conn, camera_ids)
+        cfg = self.w.settings_config(conn)
+        providers = [
+            one(conn, s.providers, p) for p in {cfg.vision_provider_id, cfg.summary_provider_id} - {None}
+        ]
+        image_limit = (
+            min(
+                [cfg.max_total_images_per_request]
+                + [self.w.effective_limits(cfg, p)["max_total_images"] for p in providers]
+            )
+            - 1
+        )
+        byte_limit = (
+            min(
+                [cfg.max_request_body_mib * 1024**2]
+                + [self.w.effective_limits(cfg, p)["max_request_body_bytes"] for p in providers]
+            )
+            // 2
+        )
+        members.sort(
+            key=lambda m: (
+                not m["reviewed"],
+                m["origin"] != "manual",
+                not bool(set(m["camera_ids"]) & set(camera_ids or [])),
+                -(m["last_seen_at_ms"] or 0),
+                m["asset_id"],
+            )
+        )
+        selected, seen, used = [], set(), 0
+        for member in members:
+            size = (member["bytes"] + 2) // 3 * 4 + 2048
+            if member["entity_id"] in seen or len(selected) >= image_limit or used + size > byte_limit:
+                continue
+            selected.append(member)
+            seen.add(member["entity_id"])
+            used += size
+        members = selected
         key = fingerprint(members)
         row = (
             conn.execute(select(s.reference_sets).where(s.reference_sets.c.fingerprint == key))
@@ -294,30 +378,7 @@ class Assets:
 
     def validate_capacity(self, conn, cfg=None):
         cfg = cfg or self.w.settings_config(conn)
-        camera_ids = list(
-            conn.execute(select(s.cameras.c.id).where(s.cameras.c.deleted_at_ms.is_(None))).scalars()
-        )
-        scopes = [[camera] for camera in camera_ids] + [None]
-        for scope in scopes:
-            members = self.members(conn, scope)
-            reference_bytes = sum((m["bytes"] + 2) // 3 * 4 + len(str(m)) * 4 + 500 for m in members)
-            for purpose, provider_id in [
-                ("vision", cfg.vision_provider_id),
-                ("summary", cfg.summary_provider_id),
-            ]:
-                if not provider_id:
-                    continue
-                limits = self.w.effective_limits(cfg, one(conn, s.providers, provider_id))
-                if (
-                    len(members) + (purpose == "vision") > limits["max_total_images"]
-                    or reference_bytes + 65536 > limits["max_request_body_bytes"]
-                ):
-                    raise AppError(
-                        422,
-                        "REFERENCE_CAPACITY_EXCEEDED",
-                        "完整参考集超过模型容量",
-                        details={"camera_ids": scope, "purpose": purpose, "reference_images": len(members)},
-                    )
+        # 模型输入按相关性选取，档案增长不会阻断现场分析；独立存储配额仍生效。
         total = conn.execute(
             select(func.coalesce(func.sum(s.reference_asset_versions.c.bytes), 0)).where(
                 s.reference_asset_versions.c.deleted_at_ms.is_(None)
@@ -404,6 +465,10 @@ class Assets:
             description=row["description"],
             enabled=row["enabled"],
             is_primary_subject=row["is_primary_subject"],
+            origin=row["origin"],
+            reviewed=row["reviewed"],
+            merged_into_id=row["merged_into_id"],
+            last_seen_at=iso(row["last_seen_at_ms"]),
             camera_ids=row["camera_ids_json"],
             references=[self.reference(conn, asset) for asset in ids],
             reference_capacity={
@@ -460,17 +525,6 @@ class Assets:
         primary = patch.get("is_primary_subject", row["is_primary_subject"]) and enabled
         if primary and row["kind"] != "person":
             raise AppError(422, "VALIDATION_ERROR", "物品不能设为主人物")
-        count = conn.execute(
-            select(func.count())
-            .select_from(s.reference_assets)
-            .where(
-                s.reference_assets.c.entity_id == entity_id,
-                s.reference_assets.c.enabled.is_(True),
-                s.reference_assets.c.deleted_at_ms.is_(None),
-            )
-        ).scalar_one()
-        if enabled and not count:
-            raise AppError(422, "REFERENCE_REQUIRED", "启用档案至少需要一张启用参考图")
         if "camera_ids" in patch:
             for camera in patch["camera_ids"]:
                 one(conn, s.cameras, camera)
@@ -481,7 +535,12 @@ class Assets:
         changes = {k: v for k, v in patch.items() if k in {"name", "description", "enabled"}}
         if "camera_ids" in patch:
             changes["camera_ids_json"] = sorted(set(patch["camera_ids"]))
-        changes |= dict(is_primary_subject=primary, revision=row["revision"] + 1, updated_at_ms=self.w.now())
+        changes |= dict(
+            is_primary_subject=primary,
+            reviewed=True,
+            revision=row["revision"] + 1,
+            updated_at_ms=self.w.now(),
+        )
         conn.execute(update(s.entities).where(s.entities.c.id == entity_id).values(**changes))
         self.validate_capacity(conn)
         self.reference_set(conn, None)

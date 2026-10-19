@@ -165,7 +165,7 @@ class Summaries:
             else self.w.assets.reference_set(conn, scope["camera_ids"])
         )
         stats = {k: v for k, v in calculated.items() if k != "slices"}
-        key = fingerprint([sources, stats, refset["fingerprint"], "statistics-v1", "summary-v1"])
+        key = fingerprint([sources, stats, refset["fingerprint"], "statistics-v2", "summary-v1"])
         return dict(
             scope=scope,
             source_refs=sources,
@@ -386,8 +386,6 @@ class Summaries:
         first = max(first, now - 31 * 86400000)
         cameras = list(conn.execute(select(s.cameras.c.id)).scalars())
         scopes = [{"camera_ids": [c], "subject_id": None} for c in cameras]
-        if cfg.primary_subject_id:
-            scopes.append(self.w.ledger.scope(conn, None, cfg.primary_subject_id, first, now))
         scheduled = 0
         for scope in scopes:
             for start in range(first // 3600000 * 3600000, now, 3600000):

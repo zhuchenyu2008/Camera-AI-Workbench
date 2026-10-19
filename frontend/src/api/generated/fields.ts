@@ -240,7 +240,13 @@ export const fields = {
           "type": "null"
         }
       ],
-      "title": "Primary Subject Id"
+      "title": "Primary Subject Id",
+      "deprecated": true
+    },
+    "auto_discovery_enabled": {
+      "type": "boolean",
+      "title": "Auto Discovery Enabled",
+      "default": true
     },
     "activity_labels": {
       "items": {

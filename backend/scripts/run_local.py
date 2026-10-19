@@ -9,6 +9,7 @@ import os
 import shutil
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -22,6 +23,7 @@ from sqlalchemy import select
 
 from app.config import Config
 from app.repositories import schema as s
+from app.repositories.db import SCHEMA_VERSION, Database
 from app.services.workbench import Workbench
 from app.worker_main import ProcessLock
 
@@ -64,8 +66,22 @@ def initialize(config: Config, *, admin_password: str | None = None) -> None:
         descriptor = os.open(key, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(Fernet.generate_key() + b"\n")
+    db = Database(config.database_url)
+    try:
+        if db.path.exists():
+            with sqlite3.connect(db.path.as_uri() + "?mode=ro", uri=True) as conn:
+                previous = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+            if previous != SCHEMA_VERSION:
+                backup = config.data_dir / "db" / f"pre-upgrade-{previous}-{int(time.time())}.sqlite3"
+                db.backup(backup)
+                print("升级前数据库快照已保存到 data 目录的 db 文件夹。", flush=True)
+    finally:
+        db.close()
     workbench = Workbench(config, migrate=True)
     try:
+        from app.activities.repair import repair_history
+
+        repair_history(workbench)
         with workbench.db.read() as conn:
             has_admin = conn.execute(select(s.users.c.id)).first() is not None
         if not has_admin:
@@ -144,6 +160,15 @@ def serve(config: Config) -> None:
                             with opener.open(url, timeout=1) as response:
                                 if response.status != 200:
                                     raise URLError("服务未就绪")
+                                if url.endswith("/health/live"):
+                                    health = json.load(response)
+                                    if (
+                                        health.get("api_version") != "2.0"
+                                        or health.get("database_schema") != "0005"
+                                    ):
+                                        raise RuntimeError(
+                                            "后台版本不一致，请停止旧 API 和 worker 后统一重启"
+                                        )
                     except (URLError, TimeoutError, OSError):
                         if time.monotonic() > deadline:
                             raise RuntimeError("本机服务启动超时，请检查 data/local/logs") from None

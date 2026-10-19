@@ -287,6 +287,27 @@ export const operations = {
     "versioned": true,
     "binary": false
   },
+  "listEntityOccurrences": {
+    "method": "GET",
+    "path": "/api/entities/{entity_id}/occurrences",
+    "idempotent": false,
+    "versioned": false,
+    "binary": false
+  },
+  "mergeEntity": {
+    "method": "POST",
+    "path": "/api/entities/{entity_id}/merge",
+    "idempotent": true,
+    "versioned": true,
+    "binary": false
+  },
+  "splitEntity": {
+    "method": "POST",
+    "path": "/api/entities/{entity_id}/split",
+    "idempotent": true,
+    "versioned": true,
+    "binary": false
+  },
   "uploadReference": {
     "method": "POST",
     "path": "/api/entities/{entity_id}/references",

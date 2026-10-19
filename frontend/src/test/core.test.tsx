@@ -23,8 +23,17 @@ import {
   syncServerTime,
 } from "../shared/time";
 import { containedRect, normalizePoint, polygonError } from "../shared/roi";
-import { sourceHref, Field, ErrorNotice } from "../shared/components";
-import { tokenText, costText, formatCnyCost } from "../features/operations/Operations";
+import {
+  sourceHref,
+  Field,
+  ErrorNotice,
+  ActivityChart,
+} from "../shared/components";
+import {
+  tokenText,
+  costText,
+  formatCnyCost,
+} from "../features/operations/Operations";
 import { useEphemeralImage } from "../shared/media/EphemeralImage";
 import { useAction } from "../shared/hooks";
 import { mergedWeek, defaultOverrideEnd } from "../shared/schedule";
@@ -439,5 +448,26 @@ describe("北京时间周计划", () => {
       ),
     ).toBe(Date.parse("2026-10-18T12:00:00+08:00"));
     expect(defaultOverrideEnd([], now)).toBe(now + 3600000);
+  });
+});
+
+describe("自由活动名称", () => {
+  it("新活动直接显示，历史分类仍显示中文，不依赖人物档案", () => {
+    render(
+      <ActivityChart
+        items={[
+          { activity: "睡觉", duration_ms: 3600000 },
+          { activity: "洗漱", duration_ms: 600000 },
+          { activity: "reading", duration_ms: 60000 },
+        ]}
+      />,
+    );
+    expect(screen.getByText("睡觉")).toBeInTheDocument();
+    expect(screen.getByText("洗漱")).toBeInTheDocument();
+    expect(screen.getByText("阅读")).toBeInTheDocument();
+    expect(screen.queryByText("人物未确认")).not.toBeInTheDocument();
+    const bars = document.querySelectorAll<HTMLElement>(".activity-fill");
+    expect(bars[0].style.getPropertyValue("--activity")).toBeTruthy();
+    expect(bars[0].style.width).toBe("100%");
   });
 });

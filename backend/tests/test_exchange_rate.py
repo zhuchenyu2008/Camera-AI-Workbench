@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-import httpx
 import pytest
 from sqlalchemy import select
 
 from app.errors import AppError
 from app.repositories import schema as s
-from app.repositories.db import new_id, one
+from app.repositories.db import one
 from app.schemas import ProviderPricingWrite
 from app.services.exchange_rate import ExchangeRateService, parse_ecb_xml
-from app.timeutils import BEIJING, now_ms
+from app.timeutils import BEIJING
 from tests.conftest import make_provider
 
 SAMPLE_ECB_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -71,23 +70,32 @@ def test_exchange_rate_service_refresh_and_regression(w):
     service = ExchangeRateService(w)
 
     # 第一次写入 2026-10-16 汇率
-    with patch("app.services.exchange_rate.fetch_ecb_rate", return_value=("2026-10-16", Decimal("7.2350"), {"eur_usd": "1.0850", "eur_cny": "7.8500"})):
+    with patch(
+        "app.services.exchange_rate.fetch_ecb_rate",
+        return_value=("2026-10-16", Decimal("7.2350"), {"eur_usd": "1.0850", "eur_cny": "7.8500"}),
+    ):
         res = asyncio.run(service.refresh())
         assert res["rate"] == "7.2350"
         assert res["rate_date"] == "2026-10-16"
 
     with w.db.read() as conn:
-        row = conn.execute(select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny")).mappings().one()
+        row = (
+            conn.execute(select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny")).mappings().one()
+        )
         assert row["rate"] == "7.2350"
         assert row["rate_date"] == "2026-10-16"
 
     # 周末/节假日返回同一天 2026-10-16：成功更新
-    with patch("app.services.exchange_rate.fetch_ecb_rate", return_value=("2026-10-16", Decimal("7.2350"), {})):
+    with patch(
+        "app.services.exchange_rate.fetch_ecb_rate", return_value=("2026-10-16", Decimal("7.2350"), {})
+    ):
         res2 = asyncio.run(service.refresh())
         assert res2["rate_date"] == "2026-10-16"
 
     # 日期倒退（2026-10-15 < 2026-10-16）：拒绝并抛出不可重试的异常
-    with patch("app.services.exchange_rate.fetch_ecb_rate", return_value=("2026-10-15", Decimal("7.2000"), {})):
+    with patch(
+        "app.services.exchange_rate.fetch_ecb_rate", return_value=("2026-10-15", Decimal("7.2000"), {})
+    ):
         with pytest.raises(AppError) as exc_info:
             asyncio.run(service.refresh())
         assert exc_info.value.code == "EXCHANGE_RATE_DATE_REGRESSION"
@@ -124,9 +132,7 @@ def test_queue_fail_retry_delays_for_exchange_rate(w):
 
     # 2. 第二次失败：重试间隔 5 分钟 (300,000 ms)
     with w.db.write() as conn:
-        conn.execute(
-            s.jobs.update().where(s.jobs.c.id == job["id"]).values(not_before_ms=now)
-        )
+        conn.execute(s.jobs.update().where(s.jobs.c.id == job["id"]).values(not_before_ms=now))
     c2 = w.queue.claim("worker_test")
     w.queue.fail(c2, err)
     with w.db.read() as conn:
@@ -137,9 +143,7 @@ def test_queue_fail_retry_delays_for_exchange_rate(w):
 
     # 3. 第三次失败：重试间隔 15 分钟 (900,000 ms)
     with w.db.write() as conn:
-        conn.execute(
-            s.jobs.update().where(s.jobs.c.id == job["id"]).values(not_before_ms=now)
-        )
+        conn.execute(s.jobs.update().where(s.jobs.c.id == job["id"]).values(not_before_ms=now))
     c3 = w.queue.claim("worker_test")
     w.queue.fail(c3, err)
     with w.db.read() as conn:
@@ -150,9 +154,7 @@ def test_queue_fail_retry_delays_for_exchange_rate(w):
 
     # 4. 第四次失败：超出 3 次重试，转为终态 failed
     with w.db.write() as conn:
-        conn.execute(
-            s.jobs.update().where(s.jobs.c.id == job["id"]).values(not_before_ms=now)
-        )
+        conn.execute(s.jobs.update().where(s.jobs.c.id == job["id"]).values(not_before_ms=now))
     c4 = w.queue.claim("worker_test")
     w.queue.fail(c4, err)
     with w.db.read() as conn:
@@ -179,7 +181,6 @@ def test_rate_validity_and_cache_7_days(w):
 
 def test_pricing_usd_triggers_exchange_rate_refresh(w):
     provider_id = make_provider(w)
-    now = w.now()
 
     # 初始状态没有汇率
     with w.db.read() as conn:
@@ -203,9 +204,7 @@ def test_pricing_usd_triggers_exchange_rate_refresh(w):
         )
 
     with w.db.read() as conn:
-        job = conn.execute(
-            select(s.jobs).where(s.jobs.c.kind == "exchange_rate_refresh")
-        ).mappings().first()
+        job = conn.execute(select(s.jobs).where(s.jobs.c.kind == "exchange_rate_refresh")).mappings().first()
         assert job is not None
         assert job["payload_json"]["reason"] == "initial_usd_pricing"
 
@@ -215,6 +214,7 @@ def test_daily_2315_scheduler(w):
 
     # 1. 没有 USD 价格时不安排刷新
     from app.worker_main import Worker
+
     worker = Worker(w)
     with w.db.write() as conn:
         worker.schedule_exchange_rate(conn)
@@ -239,21 +239,34 @@ def test_daily_2315_scheduler(w):
         )
 
     # 3. 模拟时间不是 23:15
-    with patch.object(w, "now", return_value=int(datetime(2026, 10, 18, 12, 0, tzinfo=BEIJING).timestamp() * 1000)):
+    with patch.object(
+        w, "now", return_value=int(datetime(2026, 10, 18, 12, 0, tzinfo=BEIJING).timestamp() * 1000)
+    ):
         with w.db.write() as conn:
             # 清理之前的 pricing 触发 job
             conn.execute(s.jobs.delete().where(s.jobs.c.kind == "exchange_rate_refresh"))
             worker.schedule_exchange_rate(conn)
-            jobs = conn.execute(select(s.jobs).where(s.jobs.c.kind == "exchange_rate_refresh")).mappings().all()
+            jobs = (
+                conn.execute(select(s.jobs).where(s.jobs.c.kind == "exchange_rate_refresh")).mappings().all()
+            )
             assert len(jobs) == 0
 
     # 4. 模拟时间是 23:15 -> 入队 exchange_rate_daily:2026-10-18
-    with patch.object(w, "now", return_value=int(datetime(2026, 10, 18, 23, 15, 30, tzinfo=BEIJING).timestamp() * 1000)):
+    with patch.object(
+        w, "now", return_value=int(datetime(2026, 10, 18, 23, 15, 30, tzinfo=BEIJING).timestamp() * 1000)
+    ):
         with w.db.write() as conn:
             worker.schedule_exchange_rate(conn)
-            daily_job = conn.execute(
-                select(s.jobs).where(s.jobs.c.kind == "exchange_rate_refresh", s.jobs.c.dedup_key == "exchange_rate_daily:2026-10-18")
-            ).mappings().one()
+            daily_job = (
+                conn.execute(
+                    select(s.jobs).where(
+                        s.jobs.c.kind == "exchange_rate_refresh",
+                        s.jobs.c.dedup_key == "exchange_rate_daily:2026-10-18",
+                    )
+                )
+                .mappings()
+                .one()
+            )
             assert daily_job is not None
             assert daily_job["payload_json"]["trigger"] == "daily"
 
@@ -310,4 +323,3 @@ def test_exchange_rate_api_endpoints(w, client):
     assert data2["rate"] == "7.2350"
     assert data2["rate_date"] == today_str
     assert data2["is_valid"] is True
-

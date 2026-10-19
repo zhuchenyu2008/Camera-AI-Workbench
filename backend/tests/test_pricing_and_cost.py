@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.analysis.client import format_cost
 from app.errors import AppError
-from app.observability.status import aggregate_usage, usage_data
+from app.observability.status import aggregate_usage
 from app.repositories import schema as s
 from app.repositories.db import new_id, one
-from app.schemas import ProviderPricingConfig, ProviderPricingWrite, ProviderWrite
-from app.timeutils import BEIJING, iso
+from app.schemas import ProviderPricingConfig, ProviderPricingWrite
+from app.timeutils import BEIJING
 from tests.conftest import make_provider
 
 
@@ -121,7 +122,7 @@ def test_pricing_resource_crud_and_revisions(client, w):
     assert data["pricing"]["cached_input_price"] == "0.5"
 
     # 确认 Provider 本身版本未被改变
-    prov = client.get(f"/api/providers").json()["data"][0]
+    prov = client.get("/api/providers").json()["data"][0]
     assert prov["revision"] == 1
 
     # 3. 改变 Provider 模型名称后，旧价格保留但停止应用于新调用 (applicable = False)
@@ -184,6 +185,7 @@ def test_cost_calculation_synthetic(w):
         )
         # 写入合成汇率 7.2 (当天日期)
         from datetime import datetime
+
         today_str = datetime.fromtimestamp(now / 1000, BEIJING).date().isoformat()
         conn.execute(
             s.exchange_rates.insert().values(
@@ -226,7 +228,8 @@ def test_cost_calculation_synthetic(w):
             )
         )
 
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
+
     from app.analysis.client import AIClient
     from app.schemas import Strict
 
@@ -242,9 +245,7 @@ def test_cost_calculation_synthetic(w):
     }
     mock_choice = {
         "finish_reason": "stop",
-        "message": {
-            "content": json.dumps({"status": "ok"})
-        },
+        "message": {"content": json.dumps({"status": "ok"})},
     }
 
     class MockStreamResponse:
@@ -266,15 +267,14 @@ def test_cost_calculation_synthetic(w):
 
     with patch.object(client.http, "stream", return_value=MockStreamResponse()):
         import asyncio
-        output, attempt_id = asyncio.run(
-            client.call(job, prov, {}, DummyOutput, 0, 0, limits)
-        )
+
+        output, attempt_id = asyncio.run(client.call(job, prov, {}, DummyOutput, 0, 0, limits))
 
     # 校验 ai_usage 记录
     with w.db.read() as conn:
-        usage_row = conn.execute(
-            select(s.ai_usage).where(s.ai_usage.c.attempt_id == attempt_id)
-        ).mappings().one()
+        usage_row = (
+            conn.execute(select(s.ai_usage).where(s.ai_usage.c.attempt_id == attempt_id)).mappings().one()
+        )
         assert usage_row["input_tokens"] == 1000000
         assert usage_row["output_tokens"] == 250000
         assert usage_row["cached_tokens"] == 200000
@@ -307,9 +307,10 @@ def test_cost_unknown_and_zero_values(w):
             header='"rev-1"',
         )
 
+    from unittest.mock import patch
+
     from app.analysis.client import AIClient
     from app.schemas import Strict
-    from unittest.mock import patch
 
     class DummyOutput(Strict):
         status: str
@@ -321,10 +322,14 @@ def test_cost_unknown_and_zero_values(w):
         headers = {}
 
         async def aiter_bytes(self):
-            yield json.dumps({
-                "choices": [{"finish_reason": "stop", "message": {"content": json.dumps({"status": "ok"})}}],
-                "usage": {"prompt_tokens": 100, "completion_tokens": 50},
-            }).encode("utf-8")
+            yield json.dumps(
+                {
+                    "choices": [
+                        {"finish_reason": "stop", "message": {"content": json.dumps({"status": "ok"})}}
+                    ],
+                    "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+                }
+            ).encode("utf-8")
 
         async def __aenter__(self):
             return self
@@ -359,13 +364,14 @@ def test_cost_unknown_and_zero_values(w):
         limits = w.effective_limits(w.settings_config(conn), prov)
 
     import asyncio
+
     with patch.object(client.http, "stream", return_value=MockStreamResponseZero()):
         _, attempt_id = asyncio.run(client.call(job, prov, {}, DummyOutput, 0, 0, limits))
 
     with w.db.read() as conn:
-        usage_row = conn.execute(
-            select(s.ai_usage).where(s.ai_usage.c.attempt_id == attempt_id)
-        ).mappings().one()
+        usage_row = (
+            conn.execute(select(s.ai_usage).where(s.ai_usage.c.attempt_id == attempt_id)).mappings().one()
+        )
         assert usage_row["estimated_cost"] == "0"
         assert usage_row["estimated_cost_cny"] == "0"
         assert usage_row["cost_status"] == "converted"
@@ -392,9 +398,10 @@ def test_failed_request_with_usage_keeps_cost(w):
             header='"rev-1"',
         )
 
+    from unittest.mock import patch
+
     from app.analysis.client import AIClient
     from app.schemas import VisualOutput
-    from unittest.mock import patch
 
     client = AIClient(w)
 
@@ -404,10 +411,12 @@ def test_failed_request_with_usage_keeps_cost(w):
 
         async def aiter_bytes(self):
             # 模型输出了非法结构化 JSON，引发 INVALID_MODEL_OUTPUT
-            yield json.dumps({
-                "choices": [{"finish_reason": "stop", "message": {"content": "not-valid-json"}}],
-                "usage": {"prompt_tokens": 1000, "completion_tokens": 200},
-            }).encode("utf-8")
+            yield json.dumps(
+                {
+                    "choices": [{"finish_reason": "stop", "message": {"content": "not-valid-json"}}],
+                    "usage": {"prompt_tokens": 1000, "completion_tokens": 200},
+                }
+            ).encode("utf-8")
 
         async def __aenter__(self):
             return self
@@ -442,6 +451,7 @@ def test_failed_request_with_usage_keeps_cost(w):
         limits = w.effective_limits(w.settings_config(conn), prov)
 
     import asyncio
+
     with patch.object(client.http, "stream", return_value=MockStreamResponseInvalidOutput()):
         with pytest.raises(AppError, match="INVALID_MODEL_OUTPUT"):
             asyncio.run(client.call(job, prov, {}, VisualOutput, 0, 0, limits))
@@ -451,9 +461,9 @@ def test_failed_request_with_usage_keeps_cost(w):
         attempt_id = conn.execute(
             select(s.job_attempts.c.id).where(s.job_attempts.c.job_id == job["id"])
         ).scalar_one()
-        usage_row = conn.execute(
-            select(s.ai_usage).where(s.ai_usage.c.attempt_id == attempt_id)
-        ).mappings().one()
+        usage_row = (
+            conn.execute(select(s.ai_usage).where(s.ai_usage.c.attempt_id == attempt_id)).mappings().one()
+        )
         assert usage_row["state"] == "failed"
         assert usage_row["input_tokens"] == 1000
         assert usage_row["output_tokens"] == 200
@@ -464,7 +474,6 @@ def test_failed_request_with_usage_keeps_cost(w):
 
 
 def test_usage_aggregation_cost_summary(w):
-    now = w.now()
     rows = [
         # 1. 已折算 CNY
         {

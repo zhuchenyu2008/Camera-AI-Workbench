@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   ArrowRight,
   Camera,
@@ -36,37 +35,44 @@ import { CameraControl } from "../cameras/CameraControl";
 import { TimelineStrip } from "../timeline/TimelineStrip";
 
 export function Overview() {
-  const scope = useScope(),
-    [selected, setSelected] = useState("");
+  const scope = useScope();
   const cameras = useAllApi("listCameras", undefined, { poll: 5000 }),
-    entities = useAllApi("listEntities"),
     providers = useAllApi("listProviders"),
     settings = useApi("getSettings");
+  const defaultCamera =
+    cameras.data?.find((c) => c.enabled && !c.deleted_at) ?? cameras.data?.[0];
+  const query = {
+    ...scope.query,
+    camera_ids:
+      scope.query.camera_ids ??
+      ((!scope.subject || scope.subject === "all") && defaultCamera
+        ? [defaultCamera.id]
+        : undefined),
+  };
   const q = useApi(
     "getOverview",
-    { query: scope.query },
-    { poll: scope.date === localDate() ? 30000 : undefined },
+    { query },
+    {
+      enabled: cameras.isSuccess,
+      poll: scope.date === localDate() ? 30000 : undefined,
+    },
   );
   const timeline = useApi(
     "getTimeline",
-    { query: { ...scope.query, bucket_seconds: 300 } },
-    { poll: scope.date === localDate() ? 30000 : undefined },
+    { query: { ...query, bucket_seconds: 300 } },
+    {
+      enabled: cameras.isSuccess,
+      poll: scope.date === localDate() ? 30000 : undefined,
+    },
   );
 
   const cameraList = cameras.data ?? [];
   const camera =
-    cameraList.find((c) => c.id === selected) ?? cameraList[0];
+    cameraList.find((c) => c.id === scope.camera_ids[0]) ?? cameraList[0];
 
   const isGuideLoading =
-    cameras.isLoading ||
-    entities.isLoading ||
-    providers.isLoading ||
-    settings.isLoading;
-  const isGuideError =
-    cameras.isError ||
-    entities.isError ||
-    providers.isError ||
-    settings.isError;
+    cameras.isLoading || providers.isLoading || settings.isLoading;
+  const isGuideError = cameras.isError || providers.isError || settings.isError;
 
   const visionProviderId = settings.data?.data.config.vision_provider_id;
   const visionProvider = visionProviderId
@@ -77,17 +83,7 @@ export function Overview() {
       visionProvider.tested_config_revision === visionProvider.revision &&
       visionProvider.capabilities.vision === true,
   );
-  const step2Done = Boolean(
-    entities.data?.some(
-      (e) =>
-        e.is_primary_subject &&
-        e.enabled &&
-        e.references.some((r) => r.enabled),
-    ),
-  );
-  const step3Done = Boolean(
-    cameraList.filter((c) => !c.deleted_at).length > 0,
-  );
+  const step3Done = Boolean(cameraList.filter((c) => !c.deleted_at).length > 0);
   const step4Done = Boolean(
     cameraList.some(
       (c) =>
@@ -98,7 +94,7 @@ export function Overview() {
           c.source_revision,
     ),
   );
-  const allStepsDone = step1Done && step2Done && step3Done && step4Done;
+  const allStepsDone = step1Done && step3Done && step4Done;
 
   return (
     <>
@@ -130,7 +126,6 @@ export function Overview() {
                 onClick={() => {
                   void settings.refetch();
                   void providers.refetch();
-                  void entities.refetch();
                   void cameras.refetch();
                 }}
               >
@@ -146,23 +141,17 @@ export function Overview() {
                   <ChevronRight size={16} />
                 </ScopeLink>
               </CheckItem>
-              <CheckItem done={step2Done}>
-                <ScopeLink to="/entities">
-                  <strong>02 添加参考资料</strong>
-                  <span>设置主人物及适用机位</span>
-                  <ChevronRight size={16} />
-                </ScopeLink>
-              </CheckItem>
+
               <CheckItem done={step3Done}>
                 <ScopeLink to="/cameras/new">
-                  <strong>03 添加摄像头</strong>
+                  <strong>02 添加摄像头</strong>
                   <span>测试连接、设置计划与区域</span>
                   <ChevronRight size={16} />
                 </ScopeLink>
               </CheckItem>
               <CheckItem done={step4Done}>
                 <ScopeLink to="/cameras">
-                  <strong>04 测试并启用</strong>
+                  <strong>03 测试并启用</strong>
                   <span>确认保存范围，等待首次记录</span>
                   <ChevronRight size={16} />
                 </ScopeLink>
@@ -189,7 +178,9 @@ export function Overview() {
                   <span className="sr-only">预览机位</span>
                   <select
                     value={camera?.id ?? ""}
-                    onChange={(e) => setSelected(e.target.value)}
+                    onChange={(e) => {
+                      scope.update("camera_ids", [e.target.value]);
+                    }}
                   >
                     {cameraList.map((c) => (
                       <option value={c.id} key={c.id}>
@@ -267,15 +258,6 @@ export function Overview() {
             </QueryState>
           </Panel>
         </div>
-      )}
-      {!settings.data?.data.config.primary_subject_id && entities.isSuccess && (
-        <Notice>
-          尚未指定主人物。可以按机位浏览，或在
-          <ScopeLink to="/entities" className="text-link">
-            人物与物品
-          </ScopeLink>
-          中建立档案；人物未确认的观察不会计入“我”的确定时长。
-        </Notice>
       )}
       {cameraList.length > 0 &&
       !settings.data?.data.config.vision_provider_id ? (

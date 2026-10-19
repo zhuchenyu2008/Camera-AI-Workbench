@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-19",
+  "source": "isolated synthetic backend on 18181; no user cameras or external model calls",
+  "desktop_viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "mobile_viewport": {
+    "width": 390,
+    "height": 844,
+    "document_scroll_width": 375
+  },
+  "checks": [
+    "画面主要活动默认选中，睡觉20分钟、吃饭10分钟直接展示",
+    "自动档案标记、改名保存成功",
+    "合并显示目标名称并成功更新出现记录",
+    "勾选一次出现、拆分命名成功，新档案显示人工修订",
+    "自动建档默认开启，唯一主人物字段不存在",
+    "空标签词表文案允许模型自由生成",
+    "汇率及模型单价面板正常加载，无接口不存在报错",
+    "手机页面无横向溢出",
+    "浏览器控制台无错误"
+  ],
+  "backend_regression": "84 passed; final targeted regression 14 passed",
+  "frontend_tests": "21 passed",
+  "production_build": "passed; initial gzip JS 136 KiB",
+  "screenshots": [
+    "desktop.png",
+    "mobile.png"
+  ]
+}

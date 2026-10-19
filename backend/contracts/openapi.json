@@ -14,7 +14,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/HealthDto"
+                }
               }
             }
           },
@@ -3717,7 +3719,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListEnvelope_EventDto_"
+                  "$ref": "#/components/schemas/ListEnvelope_EventSummaryDto_"
                 }
               }
             }
@@ -7687,6 +7689,600 @@
         ]
       }
     },
+    "/api/entities/{entity_id}/occurrences": {
+      "get": {
+        "summary": "Entity Occurrences",
+        "operationId": "listEntityOccurrences",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListEnvelope_EntityOccurrenceDto_"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/entities/{entity_id}/merge": {
+      "post": {
+        "summary": "Merge Entity",
+        "operationId": "mergeEntity",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\"rev-[0-9]+\"$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntityMerge"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_EntityDto_"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/entities/{entity_id}/split": {
+      "post": {
+        "summary": "Split Entity",
+        "operationId": "splitEntity",
+        "parameters": [
+          {
+            "name": "entity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entity Id"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\"rev-[0-9]+\"$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntitySplit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_EntityDto_"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/entities/{entity_id}/references": {
       "post": {
         "summary": "Upload Reference",
@@ -11355,16 +11951,8 @@
         "properties": {
           "activity": {
             "type": "string",
-            "enum": [
-              "reading",
-              "writing",
-              "computer",
-              "phone",
-              "away",
-              "resting",
-              "other",
-              "unknown"
-            ],
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Activity"
           },
           "duration_ms": {
@@ -12294,16 +12882,8 @@
           },
           "activity": {
             "type": "string",
-            "enum": [
-              "reading",
-              "writing",
-              "computer",
-              "phone",
-              "away",
-              "resting",
-              "other",
-              "unknown"
-            ],
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Activity"
           },
           "labels": {
@@ -12521,7 +13101,45 @@
           },
           "is_primary_subject": {
             "type": "boolean",
-            "title": "Is Primary Subject"
+            "title": "Is Primary Subject",
+            "deprecated": true
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "automatic"
+            ],
+            "title": "Origin",
+            "default": "manual"
+          },
+          "reviewed": {
+            "type": "boolean",
+            "title": "Reviewed",
+            "default": true
+          },
+          "merged_into_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merged Into Id"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
           },
           "camera_ids": {
             "items": {
@@ -12571,6 +13189,70 @@
           "deleted_at"
         ],
         "title": "EntityDto"
+      },
+      "EntityMerge": {
+        "properties": {
+          "target_entity_id": {
+            "type": "string",
+            "title": "Target Entity Id"
+          },
+          "target_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Target Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "target_entity_id",
+          "target_revision"
+        ],
+        "title": "EntityMerge"
+      },
+      "EntityOccurrenceDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "entity_id": {
+            "type": "string",
+            "title": "Entity Id"
+          },
+          "camera_id": {
+            "type": "string",
+            "title": "Camera Id"
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Captured At"
+          },
+          "evidence_id": {
+            "type": "string",
+            "title": "Evidence Id"
+          },
+          "crop": {
+            "$ref": "#/components/schemas/Crop"
+          },
+          "manual": {
+            "type": "boolean",
+            "title": "Manual"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "entity_id",
+          "camera_id",
+          "captured_at",
+          "evidence_id",
+          "crop",
+          "manual"
+        ],
+        "title": "EntityOccurrenceDto"
       },
       "EntityPatch": {
         "properties": {
@@ -12640,6 +13322,32 @@
         "additionalProperties": false,
         "type": "object",
         "title": "EntityPatch"
+      },
+      "EntitySplit": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "occurrence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Occurrence Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "occurrence_ids"
+        ],
+        "title": "EntitySplit"
       },
       "Envelope_AnalysisPreviewDto_": {
         "properties": {
@@ -13178,16 +13886,8 @@
           },
           "activity": {
             "type": "string",
-            "enum": [
-              "reading",
-              "writing",
-              "computer",
-              "phone",
-              "away",
-              "resting",
-              "other",
-              "unknown"
-            ],
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Activity"
           },
           "labels": {
@@ -13218,29 +13918,6 @@
             "type": "integer",
             "title": "Duration Ms"
           },
-          "segments": {
-            "items": {
-              "$ref": "#/components/schemas/SegmentDto"
-            },
-            "type": "array",
-            "title": "Segments"
-          },
-          "interruptions": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Interruptions"
-          },
-          "minute_refs": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Minute Refs"
-          },
           "evidence_state": {
             "type": "string",
             "enum": [
@@ -13265,6 +13942,29 @@
             "type": "boolean",
             "title": "Has Manual Revision"
           },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/SegmentDto"
+            },
+            "type": "array",
+            "title": "Segments"
+          },
+          "interruptions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Interruptions"
+          },
+          "minute_refs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Minute Refs"
+          },
           "replacement_event_ids": {
             "items": {
               "type": "string"
@@ -13288,15 +13988,136 @@
           "start_at",
           "end_at",
           "duration_ms",
-          "segments",
-          "interruptions",
-          "minute_refs",
           "evidence_state",
           "source_state",
           "has_manual_revision",
+          "segments",
+          "interruptions",
+          "minute_refs",
           "replacement_event_ids"
         ],
         "title": "EventDto"
+      },
+      "EventSummaryDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "source_revision": {
+            "type": "integer",
+            "title": "Source Revision"
+          },
+          "subject_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Id"
+          },
+          "identity_status": {
+            "type": "string",
+            "enum": [
+              "matched",
+              "possible",
+              "unknown"
+            ],
+            "title": "Identity Status"
+          },
+          "camera_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Camera Ids"
+          },
+          "activity": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Activity"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Labels"
+          },
+          "object_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Object Ids"
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start At"
+          },
+          "end_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End At"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "title": "Duration Ms"
+          },
+          "evidence_state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "partial",
+              "expired",
+              "evicted",
+              "missing",
+              "none"
+            ],
+            "title": "Evidence State"
+          },
+          "source_state": {
+            "type": "string",
+            "enum": [
+              "current",
+              "stale"
+            ],
+            "title": "Source State"
+          },
+          "has_manual_revision": {
+            "type": "boolean",
+            "title": "Has Manual Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "source_revision",
+          "subject_id",
+          "identity_status",
+          "camera_ids",
+          "activity",
+          "labels",
+          "object_ids",
+          "start_at",
+          "end_at",
+          "duration_ms",
+          "evidence_state",
+          "source_state",
+          "has_manual_revision"
+        ],
+        "title": "EventSummaryDto"
       },
       "EventUpdateDto": {
         "properties": {
@@ -13559,6 +14380,30 @@
         ],
         "title": "FieldError"
       },
+      "HealthDto": {
+        "properties": {
+          "alive": {
+            "type": "boolean",
+            "title": "Alive"
+          },
+          "api_version": {
+            "type": "string",
+            "title": "Api Version"
+          },
+          "database_schema": {
+            "type": "string",
+            "title": "Database Schema"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "alive",
+          "api_version",
+          "database_schema"
+        ],
+        "title": "HealthDto"
+      },
       "ImpactPreviewDto": {
         "properties": {
           "preview_token": {
@@ -13818,11 +14663,11 @@
         ],
         "title": "ListEnvelope[EntityDto]"
       },
-      "ListEnvelope_EventDto_": {
+      "ListEnvelope_EntityOccurrenceDto_": {
         "properties": {
           "data": {
             "items": {
-              "$ref": "#/components/schemas/EventDto"
+              "$ref": "#/components/schemas/EntityOccurrenceDto"
             },
             "type": "array",
             "title": "Data"
@@ -13841,7 +14686,32 @@
           "meta",
           "page"
         ],
-        "title": "ListEnvelope[EventDto]"
+        "title": "ListEnvelope[EntityOccurrenceDto]"
+      },
+      "ListEnvelope_EventSummaryDto_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/EventSummaryDto"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          },
+          "page": {
+            "$ref": "#/components/schemas/Page"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data",
+          "meta",
+          "page"
+        ],
+        "title": "ListEnvelope[EventSummaryDto]"
       },
       "ListEnvelope_JobDto_": {
         "properties": {
@@ -14288,7 +15158,7 @@
           },
           "latest_events": {
             "items": {
-              "$ref": "#/components/schemas/EventDto"
+              "$ref": "#/components/schemas/EventSummaryDto"
             },
             "type": "array",
             "title": "Latest Events"
@@ -15324,16 +16194,8 @@
           },
           "activity": {
             "type": "string",
-            "enum": [
-              "reading",
-              "writing",
-              "computer",
-              "phone",
-              "away",
-              "resting",
-              "other",
-              "unknown"
-            ],
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Activity"
           },
           "labels": {
@@ -15687,7 +16549,13 @@
                 "type": "null"
               }
             ],
-            "title": "Primary Subject Id"
+            "title": "Primary Subject Id",
+            "deprecated": true
+          },
+          "auto_discovery_enabled": {
+            "type": "boolean",
+            "title": "Auto Discovery Enabled",
+            "default": true
           },
           "activity_labels": {
             "items": {

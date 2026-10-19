@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
-from datetime import date, datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
 
 import httpx
 from sqlalchemy import select
@@ -40,7 +40,7 @@ def parse_ecb_xml(xml_bytes: bytes) -> tuple[str, Decimal, dict]:
         raise AppError(503, "EXCHANGE_RATE_PARSE_FAILED", "ECB 汇率缺少有效报价日期", retryable=True)
 
     try:
-        d = date.fromisoformat(rate_date)
+        date.fromisoformat(rate_date)
     except Exception:
         raise AppError(503, "EXCHANGE_RATE_PARSE_FAILED", "ECB 汇率日期格式非法", retryable=True)
 
@@ -98,9 +98,11 @@ class ExchangeRateService:
 
         now = self.w.now()
         with self.w.db.write() as conn:
-            existing = conn.execute(
-                select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny")
-            ).mappings().first()
+            existing = (
+                conn.execute(select(s.exchange_rates).where(s.exchange_rates.c.id == "usd_cny"))
+                .mappings()
+                .first()
+            )
 
             if existing and existing["rate_date"]:
                 existing_date = date.fromisoformat(existing["rate_date"])

@@ -380,6 +380,34 @@ class Analysis:
                 blocked=blocked,
                 support=payload["mode"],
             )
+            # 归档可能先于分钟协调完成，使用当前候选映射接回身份，不影响活动。
+            for span in spans:
+                details = span["details_json"]
+                key = details.get("subject_candidate_key")
+                candidate = (
+                    conn.execute(
+                        select(s.discovery_candidates).where(
+                            s.discovery_candidates.c.id == key, s.discovery_candidates.c.state == "archived"
+                        )
+                    )
+                    .mappings()
+                    .first()
+                    if key
+                    else None
+                )
+                if candidate:
+                    span["subject_id"], span["identity_status"] = candidate["entity_id"], "matched"
+                object_keys = details.get("object_candidate_keys", [])
+                if object_keys:
+                    ids = list(
+                        conn.execute(
+                            select(s.discovery_candidates.c.entity_id).where(
+                                s.discovery_candidates.c.id.in_(object_keys),
+                                s.discovery_candidates.c.state == "archived",
+                            )
+                        ).scalars()
+                    )
+                    details["object_ids"] = sorted(set(details["object_ids"]) | set(ids))
             previous = (
                 conn.execute(
                     select(s.minute_revisions).where(
@@ -391,6 +419,21 @@ class Analysis:
                 .first()
             )
             existing = previous["result_json"] if previous else {}
+            from app.services.discovery import Discovery
+
+            resolver = Discovery(self.w)
+            for span in spans:
+                if existing.get("manual_subject_id"):
+                    span["subject_id"], span["identity_status"] = existing["manual_subject_id"], "matched"
+                if span["subject_id"]:
+                    span["subject_id"] = resolver.resolve(conn, span["subject_id"])
+                mapping = existing.get("manual_object_assignments", {})
+                span["details_json"]["object_ids"] = sorted(
+                    {
+                        resolver.resolve(conn, mapping.get(e, e))
+                        for e in span["details_json"].get("object_ids", [])
+                    }
+                )
             preserved = False
             # 部分重分析只替换新结果实际支持的区间，保留窗口外已经有效的观察。
             if not existing.get("has_manual_revision"):
@@ -461,6 +504,9 @@ class Analysis:
                     "successful_frame_count": len(local_metas),
                 },
             )
+            for key in ("manual_subject_id", "manual_object_assignments"):
+                if key in existing:
+                    result[key] = existing[key]
             conn.execute(
                 s.minute_revisions.insert().values(
                     minute_id=minute["id"],

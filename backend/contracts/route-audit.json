@@ -323,6 +323,16 @@
       "idempotency_required": false
     },
     {
+      "operation_id": "listEntityOccurrences",
+      "method": "GET",
+      "path": "/api/entities/{entity_id}/occurrences",
+      "success": [
+        "200"
+      ],
+      "version_required": false,
+      "idempotency_required": false
+    },
+    {
       "operation_id": "listEvents",
       "method": "GET",
       "path": "/api/events",
@@ -403,6 +413,16 @@
       "idempotency_required": false
     },
     {
+      "operation_id": "mergeEntity",
+      "method": "POST",
+      "path": "/api/entities/{entity_id}/merge",
+      "success": [
+        "200"
+      ],
+      "version_required": true,
+      "idempotency_required": true
+    },
+    {
       "operation_id": "previewAnalysis",
       "method": "POST",
       "path": "/api/analysis-jobs/preview",
@@ -478,6 +498,16 @@
       "path": "/api/cameras/{camera_id}/resume-schedule",
       "success": [
         "202"
+      ],
+      "version_required": true,
+      "idempotency_required": true
+    },
+    {
+      "operation_id": "splitEntity",
+      "method": "POST",
+      "path": "/api/entities/{entity_id}/split",
+      "success": [
+        "201"
       ],
       "version_required": true,
       "idempotency_required": true
@@ -613,5 +643,5 @@
       "idempotency_required": true
     }
   ],
-  "matched_document_routes": 61
+  "matched_document_routes": 64
 }
