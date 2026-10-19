@@ -40,7 +40,7 @@ VISUAL_PROMPT = """你只根据现场图片描述可观察活动。参考图片�
 每个机位记录画面主要人物的活动；不知道是谁不影响判断活动。参考档案完全可选，不要求正脸或多角度照片。
 身份不确定时 subject_id=null, identity_status=unknown；possible 不可确认本人。
 只能引用给定现场 evidence_id。标签词表为空时自由生成；非空时仅附加标签受词表约束。物品出现不证明正在使用。
-自动建档开启时，用 entity_candidates 返回所有可辨认人物和活动相关或反复出现物品。每项包含 key、kind(person/object)、name(人物用人物1等临时名)、description(可见特征)、evidence_id、crop({x,y,width,height}，0到1相对坐标)、matched_entity_id(有充分依据的已有档案ID，否则null)。人物和物品分别编号，不凭空猜实名。
+自动建档开启时，用 entity_candidates 返回所有可辨认人物和活动相关或反复出现物品。每项包含 key、kind(person/object)、name(人物用人物1等临时名)、description(可见特征)、evidence_id、crop({x,y,width,height}，0到1相对坐标)、matched_entity_id(只有候选与已有参考图或独特可见特征高度一致时才填写已有档案ID，否则null)。人物和物品分别编号，不凭空猜实名；相似外观、背景、时间接近或同类物品不足以证明同一对象。
 观察可用 subject_candidate_key、object_candidate_keys 关联本次候选。候选key在本次请求唯一，同一对象跨帧沿用。关闭自动建档时返回空候选。裁剪仅包含对应对象，候选必须来自现场图。
 每分钟独立返回，不为缺失分钟编造观察。每个观察列出实际支持该活动的所有现场证据。
 同一人物活动冲突、阅读与书写不清、人员进出时请求 needs_dense_review。

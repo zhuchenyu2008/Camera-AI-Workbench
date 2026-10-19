@@ -66,6 +66,35 @@ def visual(w, evidence_id="frame", *, candidate=True):
     )
 
 
+def insert_discovery_candidate(w, conn, camera_id, key, kind, *, matched_entity_id=None):
+    conn.execute(
+        s.discovery_candidates.insert().values(
+            id=key,
+            camera_id=camera_id,
+            captured_at_ms=w.now(),
+            expires_at_ms=w.now() + 3600000,
+            candidate_json={
+                "key": key,
+                "kind": kind,
+                "name": "人物候选" if kind == "person" else "物品候选",
+                "description": "清晰可见的稳定特征",
+                "evidence_id": f"evidence-{key}",
+                "crop": {"x": 0, "y": 0, "width": 1, "height": 1},
+                "matched_entity_id": matched_entity_id,
+            },
+            prepared_json=None,
+            links_json=[],
+            state="pending",
+            created_at_ms=w.now(),
+        )
+    )
+
+
+def insert_entity_separation(conn, left_id, right_id):
+    left, right = sorted([left_id, right_id])
+    conn.execute(s.entity_separations.insert().values(left_id=left, right_id=right))
+
+
 def test_scene_activity_does_not_require_identity(w):
     camera = make_camera(w)
     start = w.now()
@@ -80,6 +109,95 @@ def test_scene_activity_does_not_require_identity(w):
         )
     assert scene["activities"] == [{"activity": "睡觉", "duration_ms": 60000}]
     assert personal["coverage"]["unknown_ms"] == 60000
+
+
+def test_auto_archive_merges_same_person_and_object_candidates(w):
+    camera = make_camera(w)
+    service = Discovery(w)
+    with w.db.write() as conn:
+        insert_discovery_candidate(w, conn, camera, "person-a", "person")
+        insert_discovery_candidate(w, conn, camera, "person-b", "person")
+        insert_discovery_candidate(w, conn, camera, "object-a", "object")
+        insert_discovery_candidate(w, conn, camera, "object-b", "object")
+        pending = service.pending(conn)
+        service.archive(
+            conn,
+            pending,
+            [
+                {"candidate_keys": ["person-a", "person-b"], "entity_id": None},
+                {"candidate_keys": ["object-a", "object-b"], "entity_id": None},
+            ],
+        )
+        entities = list(conn.execute(select(s.entities)).mappings())
+        occurrences = list(conn.execute(select(s.entity_occurrences)).mappings())
+
+    assert {row["kind"] for row in entities} == {"person", "object"}
+    assert len(entities) == 2
+    by_source = {row["source_key"]: row["entity_id"] for row in occurrences}
+    assert by_source["person-a"] == by_source["person-b"]
+    assert by_source["object-a"] == by_source["object-b"]
+    assert by_source["person-a"] != by_source["object-a"]
+
+
+def test_auto_archive_uses_candidate_match_and_splits_conflicting_hints(w):
+    camera = make_camera(w)
+    service = Discovery(w)
+    with w.db.write() as conn:
+        first = service.new_entity(conn, {"kind": "person", "name": "人物一", "description": "特征一"})
+        second = service.new_entity(conn, {"kind": "person", "name": "人物二", "description": "特征二"})
+        insert_discovery_candidate(w, conn, camera, "matched", "person", matched_entity_id=first)
+        insert_discovery_candidate(w, conn, camera, "hint-a", "person", matched_entity_id=first)
+        insert_discovery_candidate(w, conn, camera, "hint-b", "person", matched_entity_id=second)
+        pending = service.pending(conn)
+        service.archive(
+            conn,
+            pending,
+            [
+                {"candidate_keys": ["matched"], "entity_id": None},
+                {"candidate_keys": ["hint-a", "hint-b"], "entity_id": first},
+            ],
+        )
+        occurrences = list(conn.execute(select(s.entity_occurrences)).mappings())
+
+    by_source = {row["source_key"]: row["entity_id"] for row in occurrences}
+    assert by_source["matched"] == first
+    assert by_source["hint-a"] == first
+    assert by_source["hint-b"] == second
+
+
+def test_auto_archive_rejects_cross_kind_group_and_respects_separation(w):
+    camera = make_camera(w)
+    service = Discovery(w)
+    with pytest.raises(AppError, match="INVALID_MODEL_REFERENCES"):
+        with w.db.write() as conn:
+            insert_discovery_candidate(w, conn, camera, "person", "person")
+            insert_discovery_candidate(w, conn, camera, "object", "object")
+            service.archive(
+                conn,
+                service.pending(conn),
+                [{"candidate_keys": ["person", "object"], "entity_id": None}],
+            )
+
+    with w.db.write() as conn:
+        first = service.new_entity(conn, {"kind": "person", "name": "人物一", "description": "特征一"})
+        second = service.new_entity(conn, {"kind": "person", "name": "人物二", "description": "特征二"})
+        insert_entity_separation(conn, first, second)
+        insert_discovery_candidate(w, conn, camera, "separated-a", "person", matched_entity_id=first)
+        insert_discovery_candidate(w, conn, camera, "separated-b", "person", matched_entity_id=second)
+        service.archive(
+            conn,
+            service.pending(conn),
+            [{"candidate_keys": ["separated-a", "separated-b"], "entity_id": None}],
+        )
+        rows = list(
+            conn.execute(
+                select(s.entity_occurrences).where(
+                    s.entity_occurrences.c.source_key.in_(["separated-a", "separated-b"])
+                )
+            ).mappings()
+        )
+
+    assert {row["entity_id"] for row in rows} == {first, second}
 
 
 @pytest.mark.parametrize("mode", ["sparse", "dense"])

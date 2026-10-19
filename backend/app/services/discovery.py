@@ -270,29 +270,41 @@ class Discovery:
                 entity_id = None
             # 已有人工拆分关系不允许被自动合并回去。
             # 人工修正优先于这张图的旧自动匹配提示。
-            hints = {
-                manual_ids[k] or self.resolve(conn, by_id[k]["candidate_json"].get("matched_entity_id"))
+            hint_ids = {
+                k: manual_ids[k]
+                or self.resolve(conn, by_id[k]["candidate_json"].get("matched_entity_id"))
                 for k in keys
-            } - {None}
+            }
+            hints = set(hint_ids.values()) - {None}
             if any(self.separated(conn, a, b) for a in hints for b in hints if a < b):
                 affected.update(
                     self.archive(
                         conn,
                         [by_id[k] for k in keys],
-                        [
-                            dict(
-                                candidate_keys=[k],
-                                entity_id=by_id[k]["candidate_json"].get("matched_entity_id"),
-                            )
-                            for k in keys
-                        ],
+                        [dict(candidate_keys=[k], entity_id=hint_ids[k]) for k in keys],
                     )
                 )
                 continue
-            if entity_id and any(
+            target_is_separated = entity_id and any(
                 self.separated(conn, entity_id, hint) for hint in hints if hint != entity_id
-            ):
-                entity_id = None
+            )
+            # Conflicting automatic hints are evidence that the candidates should
+            # remain separate. A single hint is a high-confidence target from the
+            # visual pass and is useful even when the archive matcher omitted one.
+            if target_is_separated or len(hints) > 1:
+                affected.update(
+                    self.archive(
+                        conn,
+                        [by_id[k] for k in keys],
+                        [dict(candidate_keys=[k], entity_id=hint_ids[k]) for k in keys],
+                    )
+                )
+                continue
+            if not entity_id and len(hints) == 1:
+                entity_id = next(iter(hints))
+                entity = one(conn, s.entities, entity_id)
+                if entity["kind"] not in kinds or not entity["enabled"]:
+                    entity_id = None
             if not keys:
                 continue
             if not entity_id:
