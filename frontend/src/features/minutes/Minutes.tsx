@@ -244,7 +244,7 @@ export function MinuteDetail() {
                   action={<Badge>{evidenceLabels[m.evidence_state]}</Badge>}
                 >
                   <p className="observation">
-                    {m.description || "已采集画面，但此段尚无分析结果。"}
+                    {m.description || "有画面，但此段暂无活动结论。"}
                   </p>
                   <CoverageTrack coverage={m.coverage} />
                   <dl className="definition-list">

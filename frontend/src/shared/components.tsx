@@ -627,7 +627,7 @@ export function ScopePicker({
 const coverageTypes = [
   ["classified_ms", "已归类", "classified"],
   ["unknown_ms", "无法判断", "unknown"],
-  ["unanalysed_ms", "已采集但尚无分析结果", "pending"],
+  ["unanalysed_ms", "有画面，暂无活动结论", "pending"],
   ["gap_ms", "采集缺口", "gap"],
 ] as const;
 export function CoverageTrack({
@@ -723,7 +723,7 @@ export function ActivityChart({ items }: { items: ActivityDuration[] }) {
           </div>
         ))
       ) : (
-        <p className="muted">尚无已归类活动；已采集范围可能尚无分析结果。</p>
+        <p className="muted">尚无已归类活动；有画面的时间可能暂无活动结论。</p>
       )}
     </div>
   );

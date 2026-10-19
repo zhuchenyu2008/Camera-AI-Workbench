@@ -501,7 +501,7 @@ describe("分析状态文案", () => {
         }}
       />,
     );
-    expect(screen.getByText("已采集但尚无分析结果")).toBeInTheDocument();
+    expect(screen.getByText("有画面，暂无活动结论")).toBeInTheDocument();
     expect(screen.getByText("其中等待处理 1 分钟")).toBeInTheDocument();
     expect(screen.getByText("其中分析失败 2 分钟")).toBeInTheDocument();
     expect(

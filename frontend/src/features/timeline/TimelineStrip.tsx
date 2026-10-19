@@ -86,7 +86,7 @@ export function TimelineStrip({
         </span>
         <span>
           <i className="swatch pending" />
-          已采集但尚无分析结果
+          有画面，暂无活动结论
         </span>
         <span>
           <i className="swatch gap" />
@@ -99,7 +99,7 @@ export function TimelineStrip({
         >
           <p>
             已归类 {duration(bucket.coverage.classified_ms ?? 0, false)} ·
-            无法判断 {duration(bucket.coverage.unknown_ms ?? 0, false)} · 已采集但尚无分析结果{" "}
+            无法判断 {duration(bucket.coverage.unknown_ms ?? 0, false)} · 有画面，暂无活动结论{" "}
             {duration(bucket.coverage.unanalysed_ms ?? 0, false)} · 缺口{" "}
             {duration(bucket.coverage.gap_ms ?? 0, false)}
           </p>
