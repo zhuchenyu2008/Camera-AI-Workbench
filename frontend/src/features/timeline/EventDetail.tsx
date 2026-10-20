@@ -158,7 +158,7 @@ export function EventDetail() {
                             {typeof x.duration_ms === "number"
                               ? duration(x.duration_ms, false)
                               : `${typeof x.start_at === "string" ? clock(x.start_at, true) : ""}—${typeof x.end_at === "string" ? clock(x.end_at, true) : ""}`}{" "}
-                            {String(x.reason ?? x.activity ?? "无法判断")}
+                            {activityLabel(String(x.reason ?? x.activity ?? "unknown"))}
                             ；有效时长已排除此段。
                           </Notice>
                         ))}
@@ -373,7 +373,7 @@ function CorrectionEditor({
           }}
         >
           <Notice>
-            会更新相关分钟视图、事件和汇总。只能修订已有画面支持的范围；采集缺口与计划外区域仍由后端排除。
+                            会更新相关分钟视图、事件和汇总。只能修订已有画面支持的范围；未获取到画面和计划外区域仍由后端排除。
           </Notice>
           <p className="caption muted">
             原记录：{activityLabel(baseline.activity)} ·{" "}

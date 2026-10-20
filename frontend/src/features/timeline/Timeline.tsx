@@ -76,7 +76,7 @@ export function Timeline() {
       <PageHeading
         kicker="EXPLORE / TIMELINE"
         title="事件时间线"
-        description="沿时间查看活动、未确定的片段和采集缺口。"
+        description="沿时间查看活动、无具体活动的片段和未获取到画面的时段。"
       />
       <ScopePicker />
       <Panel

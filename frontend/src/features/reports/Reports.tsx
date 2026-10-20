@@ -38,7 +38,7 @@ function summaryLabel(s: SummaryDto) {
         : s.summary_state === "pending"
           ? "等待生成"
           : s.completeness === "with_gaps"
-            ? "已完成，有缺口"
+            ? "已完成，覆盖不完整"
             : "已完成";
 }
 export function Reports() {
@@ -226,7 +226,7 @@ export function ReportDetail() {
                     ? "文字生成失败，确定性统计仍然保留。"
                     : s.summary_state === "provisional"
                       ? "部分分钟仍在分析，来源更新后会重新汇总。"
-                      : "范围中存在断流、分析结果缺口或无法判断的时间，请结合覆盖明细阅读。"}
+                      : "范围中有未获取到画面、暂无可用分析结果或无具体活动的时段，请结合覆盖明细阅读。"}
               </Notice>
             ) : null}
             <div className="detail-columns">

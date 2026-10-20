@@ -82,15 +82,15 @@ export function TimelineStrip({
         ))}
         <span>
           <i className="swatch unknown" />
-          无法判断
+          无具体活动
         </span>
         <span>
           <i className="swatch pending" />
-          分析结果缺口
+          暂无可用分析结果
         </span>
         <span>
           <i className="swatch gap" />
-          缺口
+          未获取到画面
         </span>
       </div>
       {bucket && (
@@ -99,8 +99,8 @@ export function TimelineStrip({
         >
           <p>
             已归类 {duration(bucket.coverage.classified_ms ?? 0, false)} ·
-            无法判断 {duration(bucket.coverage.unknown_ms ?? 0, false)} · 分析结果缺口{" "}
-            {duration(bucket.coverage.unanalysed_ms ?? 0, false)} · 缺口{" "}
+            无具体活动 {duration(bucket.coverage.unknown_ms ?? 0, false)} · 暂无可用分析结果{" "}
+            {duration(bucket.coverage.unanalysed_ms ?? 0, false)} · 未获取到画面{" "}
             {duration(bucket.coverage.gap_ms ?? 0, false)}
           </p>
           <p className="caption">

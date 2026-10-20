@@ -501,7 +501,7 @@ describe("分析状态文案", () => {
         }}
       />,
     );
-    expect(screen.getByText("分析结果缺口")).toBeInTheDocument();
+    expect(screen.getByText("暂无可用分析结果")).toBeInTheDocument();
     expect(screen.getByText("其中分析处理中 1 分钟")).toBeInTheDocument();
     expect(screen.getByText("其中分析失败 2 分钟")).toBeInTheDocument();
     expect(

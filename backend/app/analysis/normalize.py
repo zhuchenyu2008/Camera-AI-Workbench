@@ -86,7 +86,7 @@ def normalize(
                                 "activity": "unknown",
                                 "labels": [],
                                 "object_ids": [],
-                                "observation": "模型明确无法判断此现场证据",
+                                "observation": "模型未能识别出具体活动",
                             },
                         )
                     )

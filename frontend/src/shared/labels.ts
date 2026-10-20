@@ -9,7 +9,7 @@ export const activities: Record<EventDto["activity"], string> = {
   away: "离开画面",
   resting: "休息",
   other: "其他活动",
-  unknown: "无法判断",
+  unknown: "无具体活动",
 };
 export function activityLabel(name: string): string {
   return activities[name] ?? name;

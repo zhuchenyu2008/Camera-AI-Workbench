@@ -301,10 +301,10 @@ class Summaries:
             f"现场图过期 {c.get('unanalysed_expired_ms', 0) // 1000} 秒",
         ]
         if not c.get("unanalysed_ms"):
-            analysis_parts = ["分析结果缺口 0 秒"]
+            analysis_parts = ["暂无可用分析结果 0 秒"]
         inferred = c.get("inferred_ms", 0)
         inference_part = f"，其中活动推断覆盖 {inferred // 1000} 秒" if inferred else ""
-        return f"计划采集 {c['planned_ms'] // 1000} 秒，实际采集 {c['captured_ms'] // 1000} 秒，已分类 {c['classified_ms'] // 1000} 秒，{ '、'.join(analysis_parts) }，采集缺口 {c['gap_ms'] // 1000} 秒{inference_part}。活动时长为估计值。"
+        return f"计划采集 {c['planned_ms'] // 1000} 秒，实际获取到画面 {c['captured_ms'] // 1000} 秒，已分类 {c['classified_ms'] // 1000} 秒，{ '、'.join(analysis_parts) }，未获取到画面 {c['gap_ms'] // 1000} 秒{inference_part}。活动时长为估计值。"
 
     def get(self, conn, summary_id, revision=None):
         summary = one(conn, s.summaries, summary_id)

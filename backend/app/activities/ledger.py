@@ -718,7 +718,7 @@ class Ledger:
         for interval in dto.intervals:
             x, y = timestamp(interval.start_at), timestamp(interval.end_at)
             if x < a or y > b or sum(e - s for s, e in intersect([(x, y)], available)) != y - x:
-                raise AppError(422, "EDIT_CROSSES_GAP", "修订区间不能超出来源窗口或穿过采集缺口")
+                raise AppError(422, "EDIT_CROSSES_GAP", "修订区间不能超出来源窗口或穿过未获取到画面的时段")
             if interval.subject_id:
                 entity = one(conn, s.entities, interval.subject_id, deleted=True)
                 if entity["kind"] != "person":

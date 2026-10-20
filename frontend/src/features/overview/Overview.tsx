@@ -157,7 +157,7 @@ export function Overview() {
                   <ActivityChart items={data.activities} />
                   <div className="uncertainty-grid">
                     <div>
-                      <span>无法判断</span>
+                      <span>无具体活动</span>
                       <strong>
                         {duration(data.coverage.unknown_ms ?? 0, false)}
                       </strong>
@@ -181,7 +181,7 @@ export function Overview() {
                       </strong>
                     </div>
                     <div>
-                      <span>采集缺口</span>
+                      <span>未获取到画面</span>
                       <strong>
                         {duration(data.coverage.gap_ms ?? 0, false)}
                       </strong>
@@ -243,7 +243,7 @@ export function Overview() {
               ) : (
                 <EmptyState
                   title="此范围暂未形成活动事件"
-                  description="分析结果缺口的时间不会被当作没有活动，请查看上方时间覆盖。"
+                  description="暂无可用分析结果的时间不会被当作没有活动，请查看上方时间覆盖。"
                   action={
                     <ScopeLink to="/minutes" className="text-link">
                       查看分钟记录
