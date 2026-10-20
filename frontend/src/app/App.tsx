@@ -251,7 +251,7 @@ function Shell() {
         <main id="main-content" className="main-content">
           {health.isSuccess &&
             (health.data.api_version !== "2.0" ||
-              health.data.database_schema !== "0006") && (
+              health.data.database_schema !== "0007") && (
               <Notice tone="warning">
                 后台仍是旧版本，请使用启动脚本统一重启工作台并完成数据库升级；旧后台可能缺少汇率、模型价格等接口。
               </Notice>
