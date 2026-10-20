@@ -6,6 +6,7 @@
 - [后端运行与部署](backend/README.md)
 - [视觉与交互设计](DESIGN.md)
 - [时间序列视觉分析与多轮取证架构](docs/07-时间序列视觉分析与多轮取证架构.md)
+- [时间片观察与上级裁决详细设计](docs/08-时间片观察与上级裁决详细设计.md)
 - [逐项前端验收与截图](docs/06-前端实现与验收清单.md)
 
 前端为 React + TypeScript + Vite，运行 `cd frontend`、`npm ci`、`npm run dev`；正式部署使用 `npm run build` 生成的 `dist/`，与后端放在同一 HTTPS 来源。详见两个运行说明中的连接与鉴权配置。
