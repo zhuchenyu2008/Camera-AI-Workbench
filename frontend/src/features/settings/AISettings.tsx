@@ -329,7 +329,7 @@ function ProviderEditor({
           </Field>
           <Field
             label="API 前缀"
-            hint="填写完整 /v1 等 API 前缀，主机须在部署白名单内。"
+            hint="填写完整 /v1 等 API 前缀；正式部署时还需配置模型主机白名单。"
           >
             <input
               name="base_url"

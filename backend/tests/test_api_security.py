@@ -87,6 +87,53 @@ def test_B09_source_and_filesystem_ssrf_guards(w, tmp_path):
     assert "secret" not in redact("rtsp://user:secret@127.0.0.1/live Authorization: Bearer secret")
 
 
+def test_development_provider_url_needs_no_host_allowlist(w):
+    import dataclasses
+
+    development = dataclasses.replace(
+        w.config,
+        development_mode=True,
+        provider_allowed_hosts=(),
+        provider_local_endpoints=(),
+    )
+    assert (
+        validate_provider_url("http://192.168.1.20:11434/v1", development, resolve=False)
+        == "http://192.168.1.20:11434/v1"
+    )
+    assert (
+        validate_provider_url("https://api.dev.example/v1", development, resolve=False)
+        == "https://api.dev.example/v1"
+    )
+    for url in (
+        "file:///etc/passwd",
+        "http://user:password@192.168.1.20/v1",
+        "http://192.168.1.20:bad/v1",
+    ):
+        with pytest.raises(AppError):
+            validate_provider_url(url, development, resolve=False)
+
+
+async def test_development_provider_transport_allows_private_endpoint_without_allowlist(w):
+    import dataclasses
+
+    from app.analysis.client import GuardedBackend
+
+    class RecordingBackend:
+        async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+            return host, port
+
+    development = dataclasses.replace(
+        w.config,
+        development_mode=True,
+        provider_allowed_hosts=(),
+        provider_local_endpoints=(),
+    )
+    guarded = GuardedBackend(development)
+    guarded.backend = RecordingBackend()
+
+    assert await guarded.connect_tcp("192.168.1.20", 11434) == ("192.168.1.20", 11434)
+
+
 def test_B11_keyset_cursor_binding_and_openapi_headers(client):
     for index in range(3):
         assert (

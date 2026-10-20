@@ -299,7 +299,7 @@ function CameraForm({ camera }: { camera?: CameraDto }) {
             </Field>
             <Field
               label="RTSP 端口"
-              hint="端口须已在部署白名单中配置，例如 15554。"
+              hint="请确保后端运行环境可以访问摄像头的 RTSP 地址与端口。"
             >
               <input
                 name="source.port"

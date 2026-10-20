@@ -64,25 +64,38 @@ def safe_path(root: Path, relpath: str) -> Path:
 def validate_provider_url(url: str, config: Config, resolve: bool = True) -> str:
     parts = urlsplit(url)
     host = (parts.hostname or "").lower()
-    if parts.username or parts.password or parts.query or parts.fragment or not host:
+    try:
+        port = parts.port
+    except ValueError:
+        raise AppError(422, "VALIDATION_ERROR", "模型地址端口无效") from None
+    if (
+        parts.username is not None
+        or parts.password is not None
+        or parts.query
+        or parts.fragment
+        or not host
+    ):
         raise AppError(422, "VALIDATION_ERROR", "模型地址不能包含凭据、查询或片段")
-    endpoint = f"{host}:{parts.port or (443 if parts.scheme == 'https' else 80)}"
+    if parts.scheme not in ("https", "http"):
+        raise AppError(422, "VALIDATION_ERROR", "模型地址协议不受支持")
+    if config.development_mode:
+        return url.rstrip("/")
+
+    endpoint = f"{host}:{port or (443 if parts.scheme == 'https' else 80)}"
     if endpoint in config.provider_local_endpoints:
-        if parts.scheme not in ("https", "http"):
-            raise AppError(422, "VALIDATION_ERROR", "模型地址协议不受支持")
-    else:
-        if parts.scheme != "https" or host not in config.provider_allowed_hosts:
-            raise AppError(422, "VALIDATION_ERROR", "模型地址须为部署白名单内的 HTTPS 主机")
-        if resolve:
-            try:
-                ips = [
-                    ipaddress.ip_address(addr[4][0])
-                    for addr in socket.getaddrinfo(host, parts.port or 443, type=socket.SOCK_STREAM)
-                ]
-            except OSError:
-                raise AppError(422, "VALIDATION_ERROR", "模型主机无法解析") from None
-            if not ips or any(not ip.is_global for ip in ips):
-                raise AppError(422, "VALIDATION_ERROR", "模型地址不能解析到私网、回环或保留地址")
+        pass
+    elif parts.scheme != "https" or host not in config.provider_allowed_hosts:
+        raise AppError(422, "VALIDATION_ERROR", "模型地址须为部署白名单内的 HTTPS 主机")
+    elif resolve:
+        try:
+            ips = [
+                ipaddress.ip_address(addr[4][0])
+                for addr in socket.getaddrinfo(host, port or 443, type=socket.SOCK_STREAM)
+            ]
+        except OSError:
+            raise AppError(422, "VALIDATION_ERROR", "模型主机无法解析") from None
+        if not ips or any(not ip.is_global for ip in ips):
+            raise AppError(422, "VALIDATION_ERROR", "模型地址不能解析到私网、回环或保留地址")
     return url.rstrip("/")
 
 

@@ -245,6 +245,8 @@ class Workbench:
         )
 
     def validate_source(self, source: dict):
+        if self.config.development_mode:
+            return
         if source["host"] not in self.config.rtsp_allowed_hosts:
             raise AppError(
                 422,

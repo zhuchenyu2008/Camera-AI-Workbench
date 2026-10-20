@@ -23,18 +23,22 @@ class Config:
     validated_ai_concurrency: int = 2
     max_upload_bytes: int = 8 * 1024 * 1024
     clock: object = field(default=None, repr=False, compare=False)
+    development_mode: bool = False
 
     @classmethod
     def from_env(cls) -> Config:
         data = Path(os.environ.get("CAW_DATA_DIR", "data")).resolve()
         key = Path(os.environ.get("CAW_MASTER_KEY_FILE", "/etc/camera-ai-workbench/master.key"))
         origin = os.environ.get("CAW_ALLOWED_ORIGIN", "https://camera.example.com").rstrip("/")
+        development_mode = os.environ.get("CAW_LOCAL_DEV") == "1"
         parts = urlsplit(origin)
         local_http = (
-            os.environ.get("CAW_LOCAL_DEV") == "1"
+            development_mode
             and parts.scheme == "http"
             and parts.hostname in {"127.0.0.1", "localhost"}
         )
+        if development_mode and not local_http:
+            raise ValueError("CAW_LOCAL_DEV=1 开发模式仅允许本机回环 HTTP 来源")
         if (
             (parts.scheme != "https" and not local_http)
             or not parts.hostname
@@ -56,9 +60,12 @@ class Config:
             ),
             master_key_file=key,
             allowed_origin=origin,
+            development_mode=development_mode,
             secure_cookies=not local_http,
             rtsp_allowed_ports=tuple(
-                int(p) for p in os.environ.get("CAW_RTSP_ALLOWED_PORTS", "15554,15555").split(",")
+                int(port.strip())
+                for port in os.environ.get("CAW_RTSP_ALLOWED_PORTS", "15554,15555").split(",")
+                if port.strip()
             ),
             rtsp_allowed_hosts=tuple(
                 str(IPv4Address(host.strip()))

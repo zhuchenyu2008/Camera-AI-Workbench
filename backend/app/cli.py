@@ -85,7 +85,7 @@ def main():
                 required = {"-encoders": "mjpeg", "-muxers": "hls", "-filters": "select"}[capability]
                 if required not in text:
                     parser.error("FFmpeg 缺少所需能力")
-            if not config.rtsp_allowed_ports or not config.rtsp_allowed_hosts:
+            if not config.development_mode and (not config.rtsp_allowed_ports or not config.rtsp_allowed_hosts):
                 parser.error("缺少 RTSP 主机或端口白名单")
             probe = config.data_dir / "tmp" / "write-check.part"
             probe.write_bytes(b"check")
@@ -99,10 +99,14 @@ def main():
                         "master_key": "readable",
                         "data_dir": "writable",
                         "ffmpeg": "verified",
-                        "rtsp_allowlist": "configured",
-                        "provider_allowlist": "configured"
-                        if config.provider_allowed_hosts or config.provider_local_endpoints
-                        else "empty",
+                        "rtsp_allowlist": "bypassed" if config.development_mode else "configured",
+                        "provider_allowlist": (
+                            "bypassed"
+                            if config.development_mode
+                            else "configured"
+                            if config.provider_allowed_hosts or config.provider_local_endpoints
+                            else "empty"
+                        ),
                         "free_bytes": w.disk_free(),
                     },
                     ensure_ascii=False,

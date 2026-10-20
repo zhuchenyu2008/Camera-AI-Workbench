@@ -26,7 +26,9 @@ python -m app.worker_main
 
 登录接口要求 `Origin` 与 `CAW_ALLOWED_ORIGIN` 完全一致。登录后的 `csrf_token` 用于所有写请求；浏览器使用安全、HttpOnly、SameSite=Strict 的会话 Cookie。完整 OpenAPI 也需要登录。CLI 导出不需要运行服务或读取主密钥。
 
-AI 地址需要部署白名单，默认 HTTPS。确有本机兼容服务时用 `CAW_PROVIDER_LOCAL_ENDPOINTS=主机:端口` 单独允许。网络连接验证解析后的地址并直接连接已验证的 IP，保留原始 TLS SNI，不跟随重定向，不读取系统代理。RTSP 只允许本机明确端口。前端不能更改这些部署边界。
+本机开发使用 `CAW_LOCAL_DEV=1` 与回环 HTTP 来源（例如 `http://127.0.0.1:5173`）。此模式下无需配置 RTSP 主机／端口或模型服务白名单，可连接任意 IPv4 摄像头和 HTTP／HTTPS 模型端点；开发启动器仅绑定 `127.0.0.1`。此模式会放宽网络目标限制，只应在本机开发时启用，不能用于部署。
+
+正式部署不设置 `CAW_LOCAL_DEV`：RTSP 主机与端口必须显式配置；AI 地址必须是部署白名单内的 HTTPS 主机，确有本机兼容服务时用 `CAW_PROVIDER_LOCAL_ENDPOINTS=主机:端口` 单独允许。出站连接会再次检查白名单与 DNS 解析结果、直接连接已验证的 IP，保留 TLS SNI，不跟随重定向，不读取系统代理。前端不能更改这些部署边界。
 
 参考图片会重新解码、应用 EXIF 方向、去除元数据、保存独立 JPEG。数据库备份用 `python -m app.cli backup --destination <新快照文件>`；现场图不备份，主密钥与参考图独立受保护保存。恢复应先停止两个进程，再执行迁移、资产扫描与清理，确认 TTL 后开放 API；不要直接复制运行中的 SQLite 文件。
 

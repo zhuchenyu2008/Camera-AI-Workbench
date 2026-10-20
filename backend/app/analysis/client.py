@@ -56,11 +56,13 @@ class GuardedBackend(httpcore.AsyncNetworkBackend):
     async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
         endpoint = f"{host}:{port}"
         local = endpoint in self.config.provider_local_endpoints
-        if not local and host not in self.config.provider_allowed_hosts:
+        if not self.config.development_mode and not local and host not in self.config.provider_allowed_hosts:
             raise httpcore.ConnectError("PROVIDER_HOST_DENIED")
         records = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
         addresses = [ipaddress.ip_address(r[4][0]) for r in records]
-        if not addresses or (not local and any(not addr.is_global for addr in addresses)):
+        if not addresses or (
+            not self.config.development_mode and not local and any(not addr.is_global for addr in addresses)
+        ):
             raise httpcore.ConnectError("PROVIDER_ADDRESS_DENIED")
         # 连接到已经验证的数值地址，TLS 的 SNI / 证书校验仍使用原始主机名。
         return await self.backend.connect_tcp(str(addresses[0]), port, timeout, local_address, socket_options)
