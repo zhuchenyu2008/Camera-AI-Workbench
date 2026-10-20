@@ -111,6 +111,13 @@ export function AISettings() {
                               "、",
                             ) || "待验证"}
                           </Badge>
+                          <Badge tone={p.capabilities.temporal_reasoning ? "success" : "warning"}>
+                            {p.capabilities.temporal_reasoning
+                              ? p.capabilities.tool_calling
+                                ? "时间序列与工具往返已验证"
+                                : "时间片观察已验证"
+                              : "时间序列待验证"}
+                          </Badge>
                           <ProviderPricingBadge providerId={p.id} />
                         </div>
                         {p.last_test_error && (
@@ -144,6 +151,27 @@ export function AISettings() {
                         >
                           测试实际能力
                         </Button>
+                        <Button
+                          busy={action.pending}
+                          onClick={() =>
+                            void action.run(
+                              ["temporal-test", p.id, p.revision],
+                              async (key) => {
+                                const r = await api("testProvider", {
+                                  intent: key,
+                                  body: {
+                                    provider_id: p.id,
+                                    config_revision: p.revision,
+                                    test_temporal: true,
+                                  },
+                                });
+                                setJob(r.data.id);
+                              },
+                            )
+                          }
+                        >
+                          测试时间序列能力
+                        </Button>
                         <Button variant="danger" onClick={() => setDeleting(p)}>
                           删除
                         </Button>
@@ -163,7 +191,7 @@ export function AISettings() {
         </QueryState>
       </Panel>
       <Notice>
-        测试会实际检查单图、多图、参考资料加现场图与结构化汇总输出。仅列出模型名称或服务可连接，不能代表视觉分析可用。测试调用会计入用量。
+        常规测试检查视觉、图片容量和结构化输出；时间序列测试额外验证短时间片输出与上级模型工具往返。测试调用会计入用量。
       </Notice>
       <ErrorNotice error={action.error} />
       {editing && (

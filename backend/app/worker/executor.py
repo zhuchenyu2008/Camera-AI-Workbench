@@ -10,6 +10,12 @@ from sqlalchemy import select, update
 
 from app.analysis.client import VISUAL_PROMPT, AIClient, build_payload, data_image
 from app.analysis.normalize import validate_visual
+from app.analysis.temporal import (
+    LocalObservation,
+    TemporalToolRequest,
+    validate_local_observation,
+    validate_published_timeline,
+)
 from app.errors import AppError
 from app.repositories import schema as s
 from app.repositories.db import one
@@ -37,6 +43,14 @@ class Executor:
                 await self.provider_test(job)
             elif kind in {"sparse_analysis", "dense_analysis", "dense_backfill"}:
                 await self.visual(job)
+            elif kind in {"temporal_local_observation", "temporal_reobserve"}:
+                from app.worker.temporal import TemporalExecutor
+
+                await TemporalExecutor(self.w, self.client).local_observation(job)
+            elif kind in {"temporal_review", "temporal_finalize"}:
+                from app.worker.temporal import TemporalExecutor
+
+                await TemporalExecutor(self.w, self.client).temporal_review(job)
             elif kind in {"reconcile_minutes", "manual_visual"}:
                 await asyncio.to_thread(
                     self.w.queue.finish,
@@ -362,10 +376,99 @@ class Executor:
         )
         output, _ = await self.client.call(job, provider, body, SummaryOutput, 0, 1, limits)
         validate_summary(output, [], context)
+        temporal_capable = False
+        tool_capable = False
+        if job["payload_json"].get("test_temporal"):
+            slice_start = self.w.now()
+            slice_end = slice_start + 20_000
+            local_content = [
+                {
+                    "type": "text",
+                    "text": canonical(
+                        {
+                            "slice_id": "capability-slice",
+                            "slice_start": iso(slice_start),
+                            "slice_end": iso(slice_end),
+                            "coverage": {"mode": "sparse", "evidence_ids": ["synthetic-evidence"]},
+                            "instruction": "返回一个片内观察，使用 synthetic-evidence 作为证据。",
+                        }
+                    ),
+                }
+            ]
+            local_body = build_payload(
+                provider,
+                LocalObservation,
+                local_content,
+                "只输出一个符合 local-observation-1 的时间片观察 JSON。",
+            )
+            local_output, _ = await self.client.call(
+                job, provider, local_body, LocalObservation, 0, 0, limits
+            )
+            validate_local_observation(
+                local_output,
+                slice_id="capability-slice",
+                start_ms=slice_start,
+                end_ms=slice_end,
+                evidence_ids=["synthetic-evidence"],
+            )
+            review_content = [
+                {
+                    "type": "text",
+                    "text": canonical(
+                        {
+                            "review_run_id": "capability-review",
+                            "reviewed_from": iso(slice_start),
+                            "reviewed_to": iso(slice_end),
+                            "slice_ids": ["capability-slice"],
+                            "evidence_ids": ["synthetic-evidence"],
+                            "local_observation": local_output.model_dump(mode="json"),
+                            "tool_instruction": "先请求 get_checkpoint，再提交 final。",
+                        }
+                    ),
+                }
+            ]
+            review_body = build_payload(
+                provider,
+                TemporalToolRequest,
+                review_content,
+                "返回 temporal-review-1 JSON；可以请求 get_checkpoint，随后提交 PublishedTimeline。",
+            )
+            review_output, _ = await self.client.call(
+                job, provider, review_body, TemporalToolRequest, 0, 0, limits
+            )
+            if review_output.action != "tool" or review_output.tool_name != "get_checkpoint":
+                raise AppError(422, "PROVIDER_TEMPORAL_FAILED", "模型未通过上级工具调用测试")
+            review_content.append(
+                {"type": "text", "text": "工具结果 get_checkpoint：{\"checkpoint\":null}"}
+            )
+            review_body = build_payload(
+                provider,
+                TemporalToolRequest,
+                review_content,
+                "现在提交 final PublishedTimeline，不再请求工具。",
+            )
+            review_output, _ = await self.client.call(
+                job, provider, review_body, TemporalToolRequest, 0, 0, limits
+            )
+            tool_capable = True
+            if review_output.action != "final" or review_output.timeline is None:
+                raise AppError(422, "PROVIDER_TEMPORAL_FAILED", "模型未通过上级时间线输出测试")
+            validate_published_timeline(
+                review_output.timeline,
+                review_run_id="capability-review",
+                start_ms=slice_start,
+                end_ms=slice_end,
+                evidence_ids=["synthetic-evidence"],
+                slice_ids=["capability-slice"],
+            )
+            temporal_capable = True
         cap = dict(
             vision=True,
             data_url=True,
             structured_output_modes=[provider["config_json"]["response_format_mode"]],
+            temporal_reasoning=temporal_capable,
+            tool_calling=tool_capable,
+            max_tool_rounds=2 if tool_capable else None,
             usage_fields=sorted(known_usage),
             verified_max_images=max(counts),
             verified_max_body_bytes=None,

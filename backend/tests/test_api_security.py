@@ -67,7 +67,7 @@ def test_B11_status_reports_current_versions(client):
     response = client.get("/api/status")
     assert response.status_code == 200
     assert response.json()["data"]["api_version"] == "2.0"
-    assert response.json()["data"]["db_schema_version"] == "0006"
+    assert response.json()["data"]["db_schema_version"] == "0007"
 
 
 def test_B09_source_and_filesystem_ssrf_guards(w, tmp_path):

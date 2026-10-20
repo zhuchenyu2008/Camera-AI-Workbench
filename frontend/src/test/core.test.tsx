@@ -39,6 +39,7 @@ import {
 import { useEphemeralImage } from "../shared/media/EphemeralImage";
 import { useAction } from "../shared/hooks";
 import { mergedWeek, defaultOverrideEnd } from "../shared/schedule";
+import { TemporalReviewPanel } from "../features/timeline/temporal";
 import fixture from "./fixtures/contracts.json";
 
 beforeEach(() => {
@@ -508,5 +509,68 @@ describe("分析状态文案", () => {
       screen.getByText("其中现场图已过期，未形成分析结果 3 分钟"),
     ).toBeInTheDocument();
     expect(screen.queryByText("待分析")).not.toBeInTheDocument();
+  });
+});
+
+describe("上级模型时间线裁决", () => {
+  it("旧 API 响应没有上级字段时不增加空状态区", () => {
+    const { container } = render(
+      <TemporalReviewPanel
+        displayFrom="2026-10-18T00:00:00Z"
+        displayTo="2026-10-18T01:00:00Z"
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("展示发布版本、复核进度、可变尾部和跨片段结论", () => {
+    render(
+      <TemporalReviewPanel
+        displayFrom="2026-10-18T00:00:00Z"
+        displayTo="2026-10-18T00:05:00Z"
+        review={{
+          state: "running",
+          checkpoint_revision: 4,
+          source_slice_ids: ["s1", "s2"],
+          mutable_tail: {
+            from: "2026-10-18T00:03:00Z",
+            to: "2026-10-18T00:05:00Z",
+          },
+          unresolved_ranges: [
+            {
+              from: "2026-10-18T00:02:10Z",
+              to: "2026-10-18T00:02:20Z",
+              reason: "证据不足",
+            },
+          ],
+          conflicts: [],
+        }}
+        published={{
+          revision: 3,
+          reviewed_from: "2026-10-18T00:00:00Z",
+          reviewed_to: "2026-10-18T00:03:00Z",
+          frozen_to: "2026-10-18T00:01:00Z",
+          segments: [
+            {
+              activity: "writing",
+              start_at: "2026-10-18T00:00:10Z",
+              end_at: "2026-10-18T00:02:00Z",
+              certainty: "mixed",
+              source_slice_ids: ["s1", "s2", "s3"],
+              reason: "相邻观察一致，遮挡区按前后证据推断。",
+            },
+          ],
+          unresolved_ranges: [],
+          conflicts: [],
+        }}
+      />,
+    );
+    expect(screen.getByText("已发布 r3")).toBeInTheDocument();
+    expect(screen.getByText("上级模型正在复核")).toBeInTheDocument();
+    expect(screen.getByText("书写")).toBeInTheDocument();
+    expect(screen.getByText("直接观察与推断")).toBeInTheDocument();
+    expect(screen.getByText(/可变范围/)).toBeInTheDocument();
+    expect(screen.getByText(/尚未解决 1 段/)).toBeInTheDocument();
+    expect(screen.getByText(/相邻观察一致/)).toBeInTheDocument();
   });
 });

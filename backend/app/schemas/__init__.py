@@ -417,6 +417,7 @@ class ProviderWrite(Strict):
 class ProviderTest(Strict):
     provider_id: str
     config_revision: Annotated[int, Field(ge=1)]
+    test_temporal: bool = False
 
 
 class Capabilities(Strict):
@@ -426,6 +427,9 @@ class Capabilities(Strict):
     usage_fields: list[str] = []
     verified_max_images: int | None = None
     verified_max_body_bytes: int | None = None
+    temporal_reasoning: bool = False
+    tool_calling: bool = False
+    max_tool_rounds: int | None = None
     tested_at: AwareDatetime | None = None
 
 
@@ -707,7 +711,7 @@ class Progress(Strict):
     total_units: int | None = None
     failed_units: int = 0
     expired_units: int = 0
-    unit: Literal["batch", "minute", "step"] = "step"
+    unit: Literal["batch", "minute", "slice", "review", "step"] = "step"
 
 
 class JobDto(Strict):
@@ -957,6 +961,31 @@ class TimelineBucket(Strict):
     activities: list[ActivityDuration]
 
 
+class TemporalReviewDto(Strict):
+    state: Literal["queued", "running", "partial", "complete", "failed", "expired"]
+    reviewed_from: AwareDatetime | None = None
+    reviewed_to: AwareDatetime | None = None
+    checkpoint_revision: int | None = None
+    mutable_tail: dict | None = None
+    source_slice_ids: list[str] = []
+    unresolved_ranges: list[dict] = []
+    conflicts: list[dict] = []
+    next_review: dict | None = None
+
+
+class PublishedTimelineDto(Strict):
+    schema_version: str = "published-timeline-1"
+    review_run_id: str | None = None
+    revision: int
+    reviewed_from: AwareDatetime
+    reviewed_to: AwareDatetime
+    frozen_to: AwareDatetime | None = None
+    segments: list[dict] = []
+    unresolved_ranges: list[dict] = []
+    conflicts: list[dict] = []
+    next_review: dict | None = None
+
+
 class TimelineDto(Strict):
     from_: AwareDatetime = Field(alias="from")
     to: AwareDatetime
@@ -966,6 +995,8 @@ class TimelineDto(Strict):
     buckets: list[TimelineBucket]
     event_refs: list[dict]
     truncated: bool
+    temporal_review: TemporalReviewDto | None = None
+    published_timeline: PublishedTimelineDto | None = None
 
 
 class AvailableRange(Strict):

@@ -80,6 +80,127 @@ router = APIRouter()
 Limit = Annotated[int, Query(ge=1, le=100)]
 
 
+def temporal_timeline(conn, camera_ids: list[str], start_ms: int, end_ms: int) -> dict:
+    """Return the latest published temporal review for a single-camera scope."""
+    if len(camera_ids) != 1:
+        return {"temporal_review": None, "published_timeline": None}
+    camera_id = camera_ids[0]
+    published = (
+        conn.execute(
+            select(s.published_timelines)
+            .where(
+                s.published_timelines.c.camera_id == camera_id,
+                s.published_timelines.c.is_current.is_(True),
+                s.published_timelines.c.reviewed_from_ms < end_ms,
+                s.published_timelines.c.reviewed_to_ms > start_ms,
+            )
+            .order_by(s.published_timelines.c.version.desc())
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    review = (
+        conn.execute(
+            select(s.temporal_review_runs)
+            .where(
+                s.temporal_review_runs.c.camera_id == camera_id,
+                s.temporal_review_runs.c.reviewed_from_ms < end_ms,
+                s.temporal_review_runs.c.reviewed_to_ms > start_ms,
+            )
+            .order_by(s.temporal_review_runs.c.created_at_ms.desc())
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    result = {"temporal_review": None, "published_timeline": None}
+    if review:
+        checkpoint = (
+            conn.execute(
+                select(s.temporal_checkpoints)
+                .where(
+                    s.temporal_checkpoints.c.camera_id == camera_id,
+                    s.temporal_checkpoints.c.review_run_id == review["id"],
+                )
+                .order_by(s.temporal_checkpoints.c.revision.desc())
+                .limit(1)
+            )
+            .mappings()
+            .first()
+        )
+        state = (
+            "complete"
+            if review["status"] == "succeeded"
+            else "failed"
+            if review["status"] == "cancelled"
+            else review["status"]
+        )
+        unresolved = checkpoint["unresolved_json"] if checkpoint else []
+        unresolved = [
+            {
+                "from": item.get("start_at", item.get("from")),
+                "to": item.get("end_at", item.get("to")),
+                **({"reason": item["reason"]} if item.get("reason") else {}),
+            }
+            for item in unresolved
+            if item.get("start_at", item.get("from")) and item.get("end_at", item.get("to"))
+        ]
+        result["temporal_review"] = {
+            "state": state,
+            "reviewed_from": iso(review["reviewed_from_ms"]),
+            "reviewed_to": iso(review["reviewed_to_ms"]),
+            "checkpoint_revision": checkpoint["revision"] if checkpoint else review["checkpoint_revision"],
+            "mutable_tail": (
+                {"from": iso(checkpoint["mutable_tail_start_ms"]), "to": iso(checkpoint["reviewed_to_ms"])}
+                if checkpoint and checkpoint["mutable_tail_start_ms"] is not None
+                else None
+            ),
+            "source_slice_ids": checkpoint["local_slice_ids_json"] if checkpoint else [],
+            "unresolved_ranges": unresolved,
+            "conflicts": checkpoint["conflicts_json"] if checkpoint else [],
+            "next_review": (
+                {"at": iso(checkpoint["next_review_at_ms"]), "reason": checkpoint["trigger_reason"]}
+                if checkpoint and checkpoint["next_review_at_ms"]
+                else None
+            ),
+        }
+    if published:
+        published_checkpoint = (
+            conn.execute(
+                select(s.temporal_checkpoints)
+                .where(s.temporal_checkpoints.c.id == published["checkpoint_id"])
+            )
+            .mappings()
+            .first()
+        )
+        published_unresolved = published["unresolved_json"] or []
+        published_unresolved = [
+            {
+                "from": item.get("start_at", item.get("from")),
+                "to": item.get("end_at", item.get("to")),
+                **({"reason": item["reason"]} if item.get("reason") else {}),
+            }
+            for item in published_unresolved
+            if item.get("start_at", item.get("from")) and item.get("end_at", item.get("to"))
+        ]
+        result["published_timeline"] = {
+            "schema_version": "published-timeline-1",
+            "review_run_id": published_checkpoint["review_run_id"] if published_checkpoint else None,
+            "revision": published["version"],
+            "reviewed_from": iso(published["reviewed_from_ms"]),
+            "reviewed_to": iso(published["reviewed_to_ms"]),
+            "frozen_to": iso(published_checkpoint["frozen_to_ms"])
+            if published_checkpoint and published_checkpoint["frozen_to_ms"]
+            else None,
+            "segments": published["segments_json"],
+            "unresolved_ranges": published_unresolved,
+            "conflicts": [],
+            "next_review": None,
+        }
+    return result
+
+
 @router.get("/health/live", operation_id="getHealth", response_model=HealthDto)
 def health():
     from app.repositories.db import SCHEMA_VERSION
@@ -460,9 +581,26 @@ def timeline(
     with w.db.read() as conn:
         scope = w.ledger.scope(conn, camera_ids, subject_id, a, b)
         source = w.ledger.load_range(conn, a, b, scope)
+        temporal = temporal_timeline(conn, scope["camera_ids"], a, b)
+        published = temporal.get("published_timeline")
         for start in range(a, b, bucket_seconds * 1000):
             end = min(b, start + bucket_seconds * 1000)
             result = w.ledger.calculate(conn, start, end, scope, data=source)
+            if published:
+                published_start = int(datetime.fromisoformat(published["reviewed_from"]).timestamp() * 1000)
+                published_end = int(datetime.fromisoformat(published["reviewed_to"]).timestamp() * 1000)
+                temporal_activities = {}
+                for segment in published["segments"]:
+                    segment_start = max(start, int(datetime.fromisoformat(segment["start_at"]).timestamp() * 1000))
+                    segment_end = min(end, int(datetime.fromisoformat(segment["end_at"]).timestamp() * 1000))
+                    if segment_start < segment_end:
+                        activity = segment["activity"]
+                        temporal_activities[activity] = temporal_activities.get(activity, 0) + segment_end - segment_start
+                if max(start, published_start) < min(end, published_end):
+                    result["activities"] = [
+                        {"activity": activity, "duration_ms": duration}
+                        for activity, duration in sorted(temporal_activities.items())
+                    ]
             buckets.append(
                 {
                     "start_at": iso(start),
@@ -483,6 +621,7 @@ def timeline(
                 "buckets": buckets,
                 "event_refs": [{"id": e["id"], "revision": e["revision"]} for e in events[:100]],
                 "truncated": len(events) > 100,
+                **temporal,
             },
         )
 
@@ -1383,8 +1522,12 @@ def test_provider(request: Request, dto: ProviderTest):
             conn,
             w.now(),
             "provider_test",
-            {"provider_id": dto.provider_id, "provider_revision": dto.config_revision},
-            f"provider-test:{dto.provider_id}:{dto.config_revision}:{request.headers.get('Idempotency-Key')}",
+            {
+                "provider_id": dto.provider_id,
+                "provider_revision": dto.config_revision,
+                "test_temporal": dto.test_temporal,
+            },
+            f"provider-test:{dto.provider_id}:{dto.config_revision}:{int(dto.test_temporal)}:{request.headers.get('Idempotency-Key')}",
             total=1,
         )
         return 202, job_dto(job)

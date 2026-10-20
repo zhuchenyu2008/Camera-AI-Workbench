@@ -13,6 +13,10 @@ import {
 import { activities } from "../../shared/labels";
 import { localDate, clock, serverNow } from "../../shared/time";
 import { TimelineStrip } from "./TimelineStrip";
+import {
+  TemporalReviewPanel,
+  type TemporalTimelineDto,
+} from "./temporal";
 export function Timeline() {
   const scope = useScope(),
     zoom = scope.search.get("zoom") === "4" ? "4" : "24";
@@ -118,11 +122,19 @@ export function Timeline() {
         </div>
         <QueryState query={query}>
           {({ data }) => (
-            <TimelineStrip
-              timeline={data}
-              displayFrom={range.from}
-              displayTo={range.to}
-            />
+            <>
+              <TemporalReviewPanel
+                review={(data as TemporalTimelineDto).temporal_review}
+                published={(data as TemporalTimelineDto).published_timeline}
+                displayFrom={range.from}
+                displayTo={range.to}
+              />
+              <TimelineStrip
+                timeline={data}
+                displayFrom={range.from}
+                displayTo={range.to}
+              />
+            </>
           )}
         </QueryState>
       </Panel>

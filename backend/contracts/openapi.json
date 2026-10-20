@@ -12852,6 +12852,27 @@
             ],
             "title": "Verified Max Body Bytes"
           },
+          "temporal_reasoning": {
+            "type": "boolean",
+            "title": "Temporal Reasoning",
+            "default": false
+          },
+          "tool_calling": {
+            "type": "boolean",
+            "title": "Tool Calling",
+            "default": false
+          },
+          "max_tool_rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tool Rounds"
+          },
           "tested_at": {
             "anyOf": [
               {
@@ -15419,6 +15440,8 @@
             "enum": [
               "batch",
               "minute",
+              "slice",
+              "review",
               "step"
             ],
             "title": "Unit",
@@ -15783,6 +15806,11 @@
             "type": "integer",
             "minimum": 1.0,
             "title": "Config Revision"
+          },
+          "test_temporal": {
+            "type": "boolean",
+            "title": "Test Temporal",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -15908,6 +15936,99 @@
           "model"
         ],
         "title": "ProviderWrite"
+      },
+      "PublishedTimelineDto": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "default": "published-timeline-1"
+          },
+          "review_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Run Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "reviewed_from": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reviewed From"
+          },
+          "reviewed_to": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reviewed To"
+          },
+          "frozen_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frozen To"
+          },
+          "segments": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Segments",
+            "default": []
+          },
+          "unresolved_ranges": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Unresolved Ranges",
+            "default": []
+          },
+          "conflicts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Conflicts",
+            "default": []
+          },
+          "next_review": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Review"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision",
+          "reviewed_from",
+          "reviewed_to"
+        ],
+        "title": "PublishedTimelineDto"
       },
       "ReferenceDto": {
         "properties": {
@@ -17079,6 +17200,113 @@
         ],
         "title": "SummaryDto"
       },
+      "TemporalReviewDto": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "partial",
+              "complete",
+              "failed",
+              "expired"
+            ],
+            "title": "State"
+          },
+          "reviewed_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed From"
+          },
+          "reviewed_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed To"
+          },
+          "checkpoint_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Revision"
+          },
+          "mutable_tail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mutable Tail"
+          },
+          "source_slice_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Slice Ids",
+            "default": []
+          },
+          "unresolved_ranges": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Unresolved Ranges",
+            "default": []
+          },
+          "conflicts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Conflicts",
+            "default": []
+          },
+          "next_review": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Review"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "TemporalReviewDto"
+      },
       "TimelineBucket": {
         "properties": {
           "start_at": {
@@ -17158,6 +17386,26 @@
           "truncated": {
             "type": "boolean",
             "title": "Truncated"
+          },
+          "temporal_review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TemporalReviewDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "published_timeline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublishedTimelineDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,

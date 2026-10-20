@@ -13,7 +13,16 @@ from app.schemas import Progress
 from app.timeutils import iso
 
 TERMINAL = {"succeeded", "partial", "failed", "expired", "cancelled"}
-IMAGE_KINDS = {"sparse_analysis", "dense_analysis", "dense_backfill", "manual_visual"}
+IMAGE_KINDS = {
+    "sparse_analysis",
+    "dense_analysis",
+    "dense_backfill",
+    "manual_visual",
+    "temporal_local_observation",
+    "temporal_reobserve",
+    "temporal_review",
+    "temporal_finalize",
+}
 AI_KINDS = IMAGE_KINDS | {
     "provider_test",
     "summarize_hour",
@@ -108,6 +117,45 @@ class Queue:
     def __init__(self, workbench):
         self.w = workbench
 
+    def _sync_temporal_terminal(self, conn, job: dict, state: str, now: int, error_code: str | None = None):
+        """Keep temporal run rows aligned when a job ends before its executor runs."""
+        kind = job["kind"]
+        payload = job.get("payload_json") or {}
+        error = {"code": error_code} if error_code else None
+        if kind in {"temporal_local_observation", "temporal_reobserve"}:
+            temporal_state = state if state in {"queued", "running", "succeeded", "partial", "failed", "expired", "cancelled"} else "failed"
+            conn.execute(
+                update(s.local_observation_runs)
+                .where(s.local_observation_runs.c.job_id == job["id"])
+                .values(
+                    status=temporal_state,
+                    error_json=error,
+                    updated_at_ms=now,
+                    finished_at_ms=now if temporal_state in TERMINAL else None,
+                )
+            )
+            if temporal_state in {"expired", "cancelled", "failed", "partial"}:
+                conn.execute(
+                    update(s.temporal_slices)
+                    .where(s.temporal_slices.c.id == payload.get("slice_id"))
+                    .values(
+                        state=("expired" if temporal_state == "expired" else "cancelled" if temporal_state == "cancelled" else "partial"),
+                        updated_at_ms=now,
+                    )
+                )
+        elif kind in {"temporal_review", "temporal_finalize"}:
+            temporal_state = state if state in {"queued", "running", "succeeded", "partial", "failed", "expired", "cancelled"} else "failed"
+            conn.execute(
+                update(s.temporal_review_runs)
+                .where(s.temporal_review_runs.c.job_id == job["id"])
+                .values(
+                    status=temporal_state,
+                    error_json=error,
+                    updated_at_ms=now,
+                    finished_at_ms=now if temporal_state in TERMINAL else None,
+                )
+            )
+
     def claim(self, owner: str, *, excluded_cameras: set[str] | None = None, allow_ai=True) -> dict | None:
         now = self.w.now()
         with self.w.db.write() as conn:
@@ -147,6 +195,7 @@ class Queue:
                         .where(s.jobs.c.id == row["id"])
                         .values(state="cancelled", finished_at_ms=now, phase="cancelled")
                     )
+                    self._sync_temporal_terminal(conn, row, "cancelled", now, "JOB_CANCELLED")
                     continue
                 if row["deadline_at_ms"] is not None and row["deadline_at_ms"] <= now:
                     conn.execute(
@@ -159,6 +208,7 @@ class Queue:
                             error_code="EVIDENCE_EXPIRED",
                         )
                     )
+                    self._sync_temporal_terminal(conn, row, "expired", now, "EVIDENCE_EXPIRED")
                     continue
                 if row["kind"] == "minute_decision":
                     progress = row["progress_json"]
@@ -246,6 +296,25 @@ class Queue:
                     .where(s.jobs.c.id == row["id"], s.jobs.c.state == "queued")
                     .values(**values)
                 )
+                if row["kind"] in {"temporal_local_observation", "temporal_reobserve"}:
+                    conn.execute(
+                        update(s.local_observation_runs)
+                        .where(s.local_observation_runs.c.job_id == row["id"])
+                        .values(status="running", updated_at_ms=now)
+                    )
+                    conn.execute(
+                        update(s.temporal_slices)
+                        .where(
+                            s.temporal_slices.c.id == row["payload_json"].get("slice_id")
+                        )
+                        .values(state="observing", updated_at_ms=now)
+                    )
+                elif row["kind"] in {"temporal_review", "temporal_finalize"}:
+                    conn.execute(
+                        update(s.temporal_review_runs)
+                        .where(s.temporal_review_runs.c.job_id == row["id"])
+                        .values(status="running", updated_at_ms=now)
+                    )
                 return row | values
         return None
 
@@ -349,6 +418,7 @@ class Queue:
                         finished_at_ms=now if state != "queued" else None,
                     )
                 )
+                self._sync_temporal_terminal(conn, row, "queued" if state == "queued" else state, now, "WORKER_INTERRUPTED" if state != "queued" else None)
                 conn.execute(
                     update(s.job_attempts)
                     .where(s.job_attempts.c.job_id == row["id"], s.job_attempts.c.state == "running")
@@ -424,6 +494,53 @@ class Queue:
                     failure_count=current["failure_count"] + 1,
                 )
             )
+            if job["kind"] in {"temporal_local_observation", "temporal_reobserve"}:
+                temporal_state = (
+                    "expired"
+                    if state == "expired"
+                    else "cancelled"
+                    if state == "cancelled"
+                    else "failed"
+                    if state == "failed"
+                    else "queued"
+                )
+                conn.execute(
+                    update(s.local_observation_runs)
+                    .where(s.local_observation_runs.c.job_id == job["id"])
+                    .values(
+                        status=temporal_state,
+                        error_json={"code": error.code},
+                        updated_at_ms=now,
+                        finished_at_ms=now if temporal_state != "queued" else None,
+                    )
+                )
+                if temporal_state in {"expired", "cancelled", "failed"}:
+                    conn.execute(
+                        update(s.temporal_slices)
+                        .where(s.temporal_slices.c.id == job["payload_json"].get("slice_id"))
+                        .values(
+                            state="expired"
+                            if temporal_state == "expired"
+                            else "cancelled"
+                            if temporal_state == "cancelled"
+                            else "partial",
+                            updated_at_ms=now,
+                        )
+                    )
+            elif job["kind"] in {"temporal_review", "temporal_finalize"}:
+                temporal_state = (
+                    "expired" if state == "expired" else "cancelled" if state == "cancelled" else state
+                )
+                conn.execute(
+                    update(s.temporal_review_runs)
+                    .where(s.temporal_review_runs.c.job_id == job["id"])
+                    .values(
+                        status=temporal_state,
+                        error_json={"code": error.code},
+                        updated_at_ms=now,
+                        finished_at_ms=now if temporal_state in TERMINAL else None,
+                    )
+                )
 
     def cancel(self, conn, job: dict) -> dict:
         if job["state"] in TERMINAL:
@@ -432,6 +549,8 @@ class Queue:
         if job["state"] == "queued":
             changes |= {"state": "cancelled", "phase": "cancelled", "finished_at_ms": self.w.now()}
         conn.execute(update(s.jobs).where(s.jobs.c.id == job["id"]).values(**changes))
+        if changes.get("state") == "cancelled":
+            self._sync_temporal_terminal(conn, job, "cancelled", self.w.now(), "JOB_CANCELLED")
         if job["kind"] in {"manual_visual", "reconcile_minutes"}:
             for baseline in job["payload_json"].get("baselines", []):
                 minute = one(conn, s.minute_records, baseline["id"])

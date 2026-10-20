@@ -21,6 +21,275 @@ class Analysis:
     def __init__(self, workbench):
         self.w = workbench
 
+    def plan_temporal_slice(
+        self,
+        conn,
+        camera_id: str,
+        start_ms: int,
+        end_ms: int,
+        provider_id: str,
+        *,
+        reference_set_id: str | None = None,
+        dense: bool = True,
+        evidence_ids: list[str] | None = None,
+        source_revision: int | None = None,
+        reobserve_question: str | None = None,
+        task_kind: str = "temporal_local_observation",
+    ) -> dict:
+        """Create one immutable lower-level time-slice observation task.
+
+        The caller supplies the capture snapshot. This keeps scheduling separate
+        from semantic inference and makes retries idempotent by slice/source.
+        """
+        if end_ms <= start_ms or not evidence_ids:
+            raise AppError(422, "INVALID_TEMPORAL_TASK", "时间片必须有正长度和现场证据")
+        camera = one(conn, s.cameras, camera_id, deleted=True)
+        provider = one(conn, s.providers, provider_id)
+        refs = one(conn, s.reference_sets, reference_set_id) if reference_set_id else None
+        evidence_key = fingerprint(sorted(set(evidence_ids)))[:16]
+        slice_id = f"slice_{camera_id}_{start_ms}_{end_ms}_{evidence_key}"
+        payload = {
+            "slice_id": slice_id,
+            "camera_id": camera_id,
+            "slice_start_ms": start_ms,
+            "slice_end_ms": end_ms,
+            "evidence_ids": list(dict.fromkeys(evidence_ids)),
+            "coverage_mode": "dense" if dense else "sparse",
+            "coverage": {"mode": "dense" if dense else "sparse", "evidence_ids": evidence_ids},
+            "provider_id": provider_id,
+            "provider_revision": provider["revision"],
+            "source_revision": source_revision or camera["source_revision"],
+            "reference_set_id": reference_set_id,
+            "activity_catalog": self.activity_catalog(conn, camera_id),
+            "source_fingerprint": fingerprint(
+                {
+                    "slice_id": slice_id,
+                    "evidence_ids": sorted(set(evidence_ids)),
+                    "source_revision": source_revision or camera["source_revision"],
+                    "reference_set_id": reference_set_id,
+                    "reference_set_revision": refs["revision"] if refs else None,
+                    "provider_id": provider_id,
+                    "provider_revision": provider["revision"],
+                    "prompt_version": PROMPT_VERSION,
+                    "schema_version": "local-observation-1",
+                    "activity_catalog": self.activity_catalog(conn, camera_id),
+                    "reobserve_question": reobserve_question,
+                }
+            ),
+        }
+        if reobserve_question:
+            payload["reobserve_question"] = reobserve_question[:500]
+        if refs:
+            payload["reference_set_revision"] = refs["revision"]
+        expiry_values = []
+        evidence_slots = []
+        for evidence_id in evidence_ids:
+            meta = self.w.assets.metadata(conn, evidence_id, check_file=False)
+            if meta["camera_id"] != camera_id:
+                raise AppError(422, "INVALID_TEMPORAL_TASK", "证据不属于任务摄像头")
+            expiry_values.append(timestamp(meta["expires_at"]))
+            frame = conn.execute(
+                select(s.frames.c.slot_at_ms).where(s.frames.c.id == evidence_id)
+            ).first()
+            if frame:
+                evidence_slots.append((frame.slot_at_ms, frame.slot_at_ms + 1000))
+        planned = self.w.ledger.planned(conn, camera_id, start_ms, end_ms)
+        covered = intersect(planned, union(evidence_slots))
+        missing = subtract([(start_ms, end_ms)], covered)
+        payload["coverage"] = {
+            "mode": payload["coverage_mode"],
+            "evidence_ids": payload["evidence_ids"],
+            "planned_ranges": [{"from": iso(a), "to": iso(b)} for a, b in planned],
+            "covered_ranges": [{"from": iso(a), "to": iso(b)} for a, b in covered],
+            "hard_boundaries": [{"from": iso(a), "to": iso(b)} for a, b in missing],
+            "missing_ranges": [
+                {"start_at": iso(a), "end_at": iso(b)} for a, b in missing if a < b
+            ],
+        }
+        job = enqueue(
+            conn,
+            self.w.now(),
+            task_kind,
+            payload,
+            f"{task_kind}:{payload['source_fingerprint']}",
+            deadline=min(expiry_values),
+            total=1,
+            unit="slice",
+        )
+        now = self.w.now()
+        slice_exists = conn.execute(
+            select(s.temporal_slices.c.id).where(s.temporal_slices.c.id == slice_id)
+        ).first()
+        if not slice_exists:
+            conn.execute(
+                s.temporal_slices.insert().values(
+                    id=slice_id,
+                    camera_id=camera_id,
+                    session_id=None,
+                    start_at_ms=start_ms,
+                    end_at_ms=end_ms,
+                    overlap_from_ms=None,
+                    overlap_to_ms=None,
+                    planned_coverage_json=payload["coverage"],
+                    evidence_ids_json=payload["evidence_ids"],
+                    evidence_fingerprint=fingerprint(sorted(payload["evidence_ids"])),
+                    missing_ranges_json=payload["coverage"]["hard_boundaries"],
+                    actual_start_at_ms=start_ms,
+                    actual_end_at_ms=end_ms,
+                    coverage_mode=payload["coverage_mode"],
+                    source_revision=payload["source_revision"],
+                    reference_set_id=reference_set_id,
+                    prompt_version=PROMPT_VERSION,
+                    capability_version=None,
+                    earliest_expires_at_ms=min(expiry_values),
+                    deadline_at_ms=min(expiry_values),
+                    state="open",
+                    created_at_ms=now,
+                    updated_at_ms=now,
+                )
+            )
+        run_exists = conn.execute(
+            select(s.local_observation_runs.c.id).where(
+                s.local_observation_runs.c.slice_id == slice_id,
+                s.local_observation_runs.c.request_fingerprint == payload["source_fingerprint"],
+            )
+        ).first()
+        if not run_exists:
+            conn.execute(
+                s.local_observation_runs.insert().values(
+                    id=new_id("localrun"),
+                    slice_id=slice_id,
+                    job_id=job["id"],
+                    provider_id=provider_id,
+                    model=provider["config_json"]["model"],
+                    prompt_version=PROMPT_VERSION,
+                    capability_version=None,
+                    schema_version="local-observation-1",
+                    request_fingerprint=payload["source_fingerprint"],
+                    attempt_no=1,
+                    status="queued",
+                    input_snapshot_json=payload,
+                    result_json=None,
+                    evidence_ids_json=payload["evidence_ids"],
+                    error_json=None,
+                    created_at_ms=now,
+                    updated_at_ms=now,
+                    finished_at_ms=None,
+                )
+            )
+        return job
+
+    def plan_temporal_review(
+        self,
+        conn,
+        camera_id: str,
+        start_ms: int,
+        end_ms: int,
+        provider_id: str,
+        *,
+        local_observations: list[dict] | None = None,
+        slice_ids: list[str] | None = None,
+        evidence_ids: list[str] | None = None,
+        checkpoint: dict | None = None,
+        coverage: dict | None = None,
+        reason: str = "regular_rollup",
+        finalize: bool = False,
+        max_review_rounds: int = 8,
+    ) -> dict:
+        """Create an upper-level review/finalize task over immutable snapshots."""
+        if end_ms <= start_ms:
+            raise AppError(422, "INVALID_TEMPORAL_TASK", "复核范围必须为正长度")
+        provider = one(conn, s.providers, provider_id)
+        run_id = new_id("review")
+        if checkpoint:
+            start_ms = min(start_ms, checkpoint.get("reviewed_from_ms", start_ms))
+            slice_ids = list(dict.fromkeys([*(checkpoint.get("local_slice_ids_json") or []), *(slice_ids or [])]))
+            evidence_ids = list(dict.fromkeys([*(checkpoint.get("evidence_ids_json") or []), *(evidence_ids or [])]))
+            coverage = dict(coverage or {})
+            coverage["hard_boundaries"] = list(
+                dict.fromkeys(
+                    [
+                        *(checkpoint.get("hard_boundaries_json") or []),
+                        *(coverage.get("hard_boundaries") or []),
+                    ]
+                )
+            )
+        payload = {
+            "review_run_id": run_id,
+            "camera_id": camera_id,
+            "review_start_ms": start_ms,
+            "review_end_ms": end_ms,
+            "provider_id": provider_id,
+            "provider_revision": provider["revision"],
+            "local_observations": local_observations or [],
+            "slice_ids": list(dict.fromkeys(slice_ids or [])),
+            "evidence_ids": list(dict.fromkeys(evidence_ids or [])),
+            "checkpoint": checkpoint,
+            "coverage": coverage or {},
+            "max_review_rounds": max(0, min(8, int(max_review_rounds))),
+            "reason": reason,
+        }
+        payload["source_fingerprint"] = fingerprint(
+            {
+                "camera_id": camera_id,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "slice_ids": payload["slice_ids"],
+                "evidence_ids": payload["evidence_ids"],
+                "checkpoint": checkpoint,
+                "local_observations": payload["local_observations"],
+                "coverage": payload["coverage"],
+                "reason": reason,
+                "provider_id": provider_id,
+                "provider_revision": provider["revision"],
+                "tool_protocol_version": "temporal-review-1",
+                "schema_version": "published-timeline-1",
+                "max_review_rounds": max(0, min(8, int(max_review_rounds))),
+            }
+        )
+        kind = "temporal_finalize" if finalize else "temporal_review"
+        job = enqueue(
+            conn,
+            self.w.now(),
+            kind,
+            payload,
+            f"temporal-review:{payload['source_fingerprint']}",
+            deadline=self.w.now() + 10 * 60 * 1000,
+            total=1,
+            unit="review",
+        )
+        now = self.w.now()
+        trigger_kind = "finalize" if finalize else "rolling" if reason == "regular_rollup" else "issue"
+        if not conn.execute(
+            select(s.temporal_review_runs.c.id).where(
+                s.temporal_review_runs.c.request_fingerprint == payload["source_fingerprint"]
+            )
+        ).first():
+            conn.execute(
+                s.temporal_review_runs.insert().values(
+                    id=run_id,
+                    camera_id=camera_id,
+                    job_id=job["id"],
+                    base_checkpoint_id=(checkpoint or {}).get("id"),
+                    reviewed_from_ms=start_ms,
+                    reviewed_to_ms=end_ms,
+                    trigger_kind=trigger_kind,
+                    trigger_reason=reason,
+                    checkpoint_revision=(checkpoint or {}).get("revision", 0),
+                    tool_protocol_version="temporal-review-1",
+                    schema_version="published-timeline-1",
+                    budget_json={"max_review_rounds": payload["max_review_rounds"]},
+                    status="queued",
+                    request_fingerprint=payload["source_fingerprint"],
+                    result_json=None,
+                    error_json=None,
+                    created_at_ms=now,
+                    updated_at_ms=now,
+                    finished_at_ms=None,
+                )
+            )
+        return job
+
     def activity_catalog(self, conn, camera_id: str) -> list[dict]:
         """Return the recent positive activity names for one camera."""
         now = self.w.now()
@@ -661,8 +930,13 @@ class Analysis:
         if not cfg.vision_provider_id:
             return
         try:
-            self.w.require_provider(one(conn, s.providers, cfg.vision_provider_id))
+            provider = one(conn, s.providers, cfg.vision_provider_id)
+            self.w.require_provider(provider)
         except AppError:
+            return
+        capabilities = provider["capabilities_json"] or {}
+        if capabilities.get("temporal_reasoning") and capabilities.get("tool_calling"):
+            self.schedule_temporal(conn, provider)
             return
         minutes = (
             conn.execute(
@@ -750,3 +1024,247 @@ class Analysis:
         for (camera, mode, _), frames in grouped.items():
             refset = self.w.assets.reference_set(conn, [camera])
             self.plan(conn, camera, frames, refset, mode)
+
+    def schedule_temporal(self, conn, provider):
+        """Roll completed capture into 20-second observations and reviews.
+
+        Temporal scheduling is capability-gated so an ordinary verified vision
+        provider continues using the compatible minute pipeline until its
+        temporal replay test has passed.
+        """
+        now = self.w.now()
+        slice_seconds = 20_000
+        slice_step = 15_000
+        review_start = now - 120_000
+        cameras = (
+            conn.execute(
+                select(
+                    s.cameras,
+                    s.camera_runtime.c.capture_state,
+                    s.camera_runtime.c.stop_reason,
+                    s.camera_runtime.c.stream_session_id,
+                )
+                .join(s.camera_runtime, s.camera_runtime.c.camera_id == s.cameras.c.id)
+                .where(s.cameras.c.deleted_at_ms.is_(None))
+            )
+            .mappings()
+            .all()
+        )
+        for camera in cameras:
+            camera_id = camera["id"]
+            stopped = (
+                camera["capture_state"] == "stopped"
+                and camera["stream_session_id"] is None
+                and camera["stop_reason"] in {"disabled", "outside_schedule", "manual_override"}
+            )
+            frames = self.available(conn, [camera_id], review_start - 60_000, now)
+            first_start = frames[0]["slot_at_ms"] // slice_step * slice_step if frames else None
+            last_start = frames[-1]["slot_at_ms"] // slice_step * slice_step if frames else None
+            windows = []
+            for start in range(first_start, last_start + 1, slice_step) if frames else []:
+                end = start + slice_seconds
+                if end > now:
+                    continue
+                local = [frame for frame in frames if start <= frame["slot_at_ms"] < end]
+                if not local:
+                    continue
+                refset = self.w.assets.reference_set(conn, [camera_id])
+                self.plan_temporal_slice(
+                    conn,
+                    camera_id,
+                    start,
+                    end,
+                    provider["id"],
+                    reference_set_id=refset["id"],
+                    dense=True,
+                    evidence_ids=[frame["id"] for frame in local],
+                    source_revision=camera["source_revision"],
+                )
+                windows.append((start, end))
+            if not windows and not stopped:
+                continue
+            latest_end = max((end for _, end in windows), default=now)
+            checkpoint = (
+                conn.execute(
+                    select(s.temporal_checkpoints)
+                    .where(s.temporal_checkpoints.c.camera_id == camera_id)
+                    .order_by(s.temporal_checkpoints.c.revision.desc())
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            )
+            baseline = checkpoint["reviewed_to_ms"] if checkpoint else min(
+                (start for start, _ in windows), default=now
+            )
+            camera_review_start = (
+                min(review_start, baseline - 120_000) if stopped and checkpoint else
+                min(review_start, now - 300_000) if stopped else
+                max(review_start, baseline - 120_000)
+            )
+            completed = (
+                conn.execute(
+                    select(
+                        s.temporal_slices.c.id.label("slice_id"),
+                        s.temporal_slices.c.start_at_ms,
+                        s.temporal_slices.c.end_at_ms,
+                        s.temporal_slices.c.evidence_ids_json,
+                        s.temporal_slices.c.planned_coverage_json,
+                        s.local_observation_runs.c.result_json,
+                    )
+                    .join(s.local_observation_runs, s.local_observation_runs.c.slice_id == s.temporal_slices.c.id)
+                    .where(
+                        s.temporal_slices.c.camera_id == camera_id,
+                        s.temporal_slices.c.start_at_ms >= camera_review_start,
+                        s.temporal_slices.c.end_at_ms <= latest_end,
+                        s.local_observation_runs.c.status == "succeeded",
+                    )
+                    .order_by(s.temporal_slices.c.start_at_ms)
+                )
+                .mappings()
+                .all()
+            )
+            if not completed and not (stopped and checkpoint):
+                continue
+            active = conn.execute(
+                select(s.temporal_review_runs.c.id).where(
+                    s.temporal_review_runs.c.camera_id == camera_id,
+                    s.temporal_review_runs.c.status.in_(["queued", "running"]),
+                    s.temporal_review_runs.c.reviewed_to_ms > camera_review_start,
+                )
+            ).first()
+            if active:
+                continue
+            observations = [
+                row["result_json"]["local_observation"]
+                for row in completed
+                if row["result_json"] and row["result_json"].get("local_observation")
+            ]
+            issue = any(item.get("review_requests") or item.get("transition_candidates") for item in observations)
+            if stopped:
+                if not completed and not checkpoint:
+                    continue
+                pending_local = conn.execute(
+                    select(s.local_observation_runs.c.id)
+                    .join(s.temporal_slices, s.temporal_slices.c.id == s.local_observation_runs.c.slice_id)
+                    .where(
+                        s.temporal_slices.c.camera_id == camera_id,
+                        s.temporal_slices.c.start_at_ms >= camera_review_start,
+                        s.local_observation_runs.c.status.in_(["queued", "running"]),
+                    )
+                ).first()
+                if pending_local:
+                    continue
+                final_to = max(
+                    checkpoint["reviewed_to_ms"] if checkpoint else 0,
+                    completed[-1]["end_at_ms"] if completed else 0,
+                )
+                final_exists = conn.execute(
+                    select(s.temporal_review_runs.c.id)
+                    .where(
+                        s.temporal_review_runs.c.camera_id == camera_id,
+                        s.temporal_review_runs.c.trigger_kind == "finalize",
+                        s.temporal_review_runs.c.reviewed_to_ms >= final_to,
+                        s.temporal_review_runs.c.status.in_(
+                            ["queued", "running", "succeeded", "partial", "failed", "expired", "cancelled"]
+                        ),
+                    )
+                    .limit(1)
+                ).first()
+                if final_exists:
+                    continue
+                if completed:
+                    first, last = completed[0], completed[-1]
+                    review_from = min(first["start_at_ms"], camera_review_start)
+                    review_to = max(last["end_at_ms"], checkpoint["reviewed_to_ms"] if checkpoint else 0)
+                    covered_ranges = union(
+                        [
+                            (timestamp(item["from"]), timestamp(item["to"]))
+                            for row in completed
+                            for item in row["planned_coverage_json"].get("covered_ranges", [])
+                        ]
+                    )
+                    hard_boundaries = [
+                        {"from": iso(start), "to": iso(end)}
+                        for start, end in subtract([(review_from, last["end_at_ms"])], covered_ranges)
+                    ]
+                    if checkpoint and checkpoint["reviewed_to_ms"] < review_from:
+                        hard_boundaries.append(
+                            {"from": iso(checkpoint["reviewed_to_ms"]), "to": iso(review_from)}
+                        )
+                    review_start_ms = review_from
+                    local_observations = observations
+                    slice_ids = [row["slice_id"] for row in completed]
+                    evidence_ids = list(
+                        dict.fromkeys(
+                            evidence_id for row in completed for evidence_id in row["evidence_ids_json"]
+                        )
+                    )
+                    coverage = {
+                        "slices": [row["planned_coverage_json"] for row in completed],
+                        "hard_boundaries": hard_boundaries,
+                    }
+                else:
+                    review_start_ms = checkpoint["reviewed_from_ms"]
+                    review_to = checkpoint["reviewed_to_ms"]
+                    local_observations = []
+                    slice_ids = []
+                    evidence_ids = []
+                    coverage = {"hard_boundaries": checkpoint["hard_boundaries_json"] or []}
+                self.plan_temporal_review(
+                    conn,
+                    camera_id,
+                    review_start_ms,
+                    review_to,
+                    provider["id"],
+                    local_observations=local_observations,
+                    slice_ids=slice_ids,
+                    evidence_ids=evidence_ids,
+                    checkpoint=dict(checkpoint) if checkpoint else None,
+                    coverage=coverage,
+                    reason="capture_stopped",
+                    finalize=True,
+                )
+                continue
+            if len(observations) < 2 or (latest_end - baseline < 120_000 and not issue):
+                continue
+            first, last = completed[0], completed[-1]
+            covered_ranges = union(
+                [
+                    (timestamp(item["from"]), timestamp(item["to"]))
+                    for row in completed
+                    for item in row["planned_coverage_json"].get("covered_ranges", [])
+                ]
+            )
+            review_from = min(first["start_at_ms"], camera_review_start)
+            review_to = last["end_at_ms"]
+            hard_boundaries = [
+                {"from": iso(start), "to": iso(end)}
+                for start, end in subtract([(review_from, review_to)], covered_ranges)
+            ]
+            if checkpoint and checkpoint["reviewed_to_ms"] < review_from:
+                hard_boundaries.append(
+                    {"from": iso(checkpoint["reviewed_to_ms"]), "to": iso(review_from)}
+                )
+            self.plan_temporal_review(
+                conn,
+                camera_id,
+                review_from,
+                review_to,
+                provider["id"],
+                local_observations=observations,
+                slice_ids=[row["slice_id"] for row in completed],
+                evidence_ids=list(
+                    dict.fromkeys(
+                        evidence_id
+                        for row in completed
+                        for evidence_id in row["evidence_ids_json"]
+                    )
+                ),
+                coverage={
+                    "slices": [row["planned_coverage_json"] for row in completed],
+                    "hard_boundaries": hard_boundaries,
+                },
+                checkpoint=dict(checkpoint) if checkpoint else None,
+                reason="review_request" if issue else "regular_rollup",
+            )
