@@ -974,6 +974,7 @@ export function JobProgress({
                 {typeof j.error.next_retry_at === "string" && (
                   <p>将在 {dateTime(j.error.next_retry_at)} 重试</p>
                 )}
+                <JobErrorDetails error={j.error} />
               </Notice>
             )}
             <p className="caption mono">任务 {j.id}</p>
@@ -1016,6 +1017,36 @@ export function JobProgress({
     </div>
   );
 }
+function JobErrorDetails({ error }: { error: Record<string, unknown> }) {
+  const raw = error.safe_details;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const details = raw as Record<string, unknown>;
+  const labels: Record<string, string> = {
+    provider_http_status: "上游 HTTP 状态",
+    provider_error_code: "上游错误码",
+    provider_error_type: "上游错误类型",
+    provider_error_message: "上游说明",
+    provider_request_id: "上游请求 ID",
+    provider_transport_error: "连接错误类型",
+    worker_error_type: "Worker 异常类型",
+  };
+  const rows = Object.entries(labels).flatMap(([key, label]) => {
+    const value = details[key];
+    return typeof value === "string" || typeof value === "number"
+      ? [[label, String(value)] as const]
+      : [];
+  });
+  return rows.length ? (
+    <div className="caption" aria-label="错误诊断详情">
+      {rows.map(([label, value]) => (
+        <p key={label}>
+          {label}：<span className={label.includes("请求 ID") ? "mono" : undefined}>{value}</span>
+        </p>
+      ))}
+    </div>
+  ) : null;
+}
+
 export function JobModal({ id, onClose }: { id: string; onClose: () => void }) {
   return (
     <Modal title="任务进度" onClose={onClose}>

@@ -322,7 +322,22 @@ async def test_B05_retry_after_and_provider_pause(w, jpeg, clock):
     with w.db.write() as conn:
         refs = w.assets.reference_set(conn, [camera])
         Analysis(w).plan(conn, camera, frames[:1], refs, "dense")
-    client = AIClient(w, httpx.MockTransport(lambda r: httpx.Response(429, headers={"Retry-After": "180"})))
+    client = AIClient(
+        w,
+        httpx.MockTransport(
+            lambda r: httpx.Response(
+                429,
+                headers={"Retry-After": "180", "x-request-id": "req-rate-limit-42"},
+                json={
+                    "error": {
+                        "code": "rate_limit_exceeded",
+                        "type": "requests",
+                        "message": "Rate limit for Bearer sk-testsecret123456; see https://provider.example/error",
+                    }
+                },
+            )
+        ),
+    )
     executor = Executor(w, Supervisor(w), client)
     try:
         job = w.queue.claim("worker")
@@ -331,6 +346,13 @@ async def test_B05_retry_after_and_provider_pause(w, jpeg, clock):
             saved = one(conn, s.jobs, job["id"])
             assert saved["state"] == "queued" and saved["queue_reason"] == "retry_wait"
             assert saved["not_before_ms"] >= clock.value + 180000
+            assert saved["error_json"]["safe_details"] == {
+                "provider_http_status": 429,
+                "provider_request_id": "req-rate-limit-42",
+                "provider_error_code": "rate_limit_exceeded",
+                "provider_error_type": "requests",
+                "provider_error_message": "Rate limit for Bearer [redacted]; see [URL]",
+            }
             usage = conn.execute(select(s.ai_usage)).mappings().one()
             assert usage["input_tokens"] is None and usage["billing_status"] == "unknown"
         clock.advance(180000)
@@ -341,7 +363,9 @@ async def test_B05_retry_after_and_provider_pause(w, jpeg, clock):
         await Executor(w, Supervisor(w), client).execute(w.queue.claim("worker"))
         with w.db.read() as conn:
             assert one(conn, s.providers, provider)["paused"]
-            assert one(conn, s.jobs, job["id"])["queue_reason"] == "provider_paused"
+            saved = one(conn, s.jobs, job["id"])
+            assert saved["queue_reason"] == "provider_paused"
+            assert saved["error_json"]["safe_details"]["provider_http_status"] == 401
         assert w.queue.claim("worker") is None
     finally:
         await client.close()

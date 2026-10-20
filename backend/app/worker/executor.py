@@ -93,12 +93,18 @@ class Executor:
                 await asyncio.to_thread(self.record_summary_failure, job, exc)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            # 不将异常文本（可能带路径或 URL 凭据）写入日志或公共错误。
+        except Exception as exc:
+            # 仅保留异常类型；异常文本可能包含路径、URL 凭据或请求内容。
             await asyncio.to_thread(
                 self.w.queue.fail,
                 job,
-                AppError(503, "WORKER_EXECUTION_FAILED", "任务执行失败，请查看运行环境", retryable=True),
+                AppError(
+                    503,
+                    "WORKER_EXECUTION_FAILED",
+                    "任务执行失败，请查看运行环境",
+                    retryable=True,
+                    details={"worker_error_type": type(exc).__name__},
+                ),
             )
 
     def load_provider(self, job):

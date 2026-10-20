@@ -94,6 +94,26 @@ def enqueue(
     return row
 
 
+def safe_error_details(details: dict) -> dict:
+    """Persist only known, bounded provider/worker diagnostics, never arbitrary exception data."""
+    safe = {}
+    status = details.get("provider_http_status")
+    if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
+        safe["provider_http_status"] = status
+    for key, limit in (
+        ("provider_request_id", 160),
+        ("provider_error_code", 100),
+        ("provider_error_type", 100),
+        ("provider_error_message", 240),
+        ("provider_transport_error", 100),
+        ("worker_error_type", 100),
+    ):
+        value = details.get(key)
+        if isinstance(value, str) and value.strip():
+            safe[key] = value.strip()[:limit]
+    return safe
+
+
 def job_dto(row: dict) -> dict:
     return dict(
         id=row["id"],
@@ -486,7 +506,7 @@ class Queue:
                         "message": error.message,
                         "retryable": state == "queued",
                         "next_retry_at": iso(now + wait) if state == "queued" else None,
-                        "safe_details": {},
+                        "safe_details": safe_error_details(error.details),
                     },
                     lease_until_ms=None,
                     finished_at_ms=now if state in TERMINAL else None,

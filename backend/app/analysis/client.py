@@ -5,6 +5,7 @@ import base64
 import email.utils
 import ipaddress
 import json
+import re
 import socket
 import ssl
 import time
@@ -148,6 +149,58 @@ def retry_after(value: str | None, now: int) -> int:
             return 0
 
 
+def _safe_provider_text(value, *, limit=240) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = "".join(char for char in value if char.isprintable()).strip()
+    text = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer [redacted]", text)
+    text = re.sub(r"(?i)\b(?:sk|rk|pk)-[A-Za-z0-9_-]{8,}", "[redacted key]", text)
+    text = re.sub(
+        r"(?i)\b(api[_-]?key|access[_-]?token|authorization|password)\s*[:=]\s*[^\s,;]+",
+        r"\1=[redacted]",
+        text,
+    )
+    text = re.sub(r"https?://[^\s]+", "[URL]", text)
+    return text[:limit] or None
+
+
+async def provider_error_details(response: httpx.Response) -> dict:
+    """Keep only bounded, scrubbed upstream diagnostics; never persist the raw body."""
+    details = {"provider_http_status": response.status_code}
+    for header in ("x-request-id", "request-id", "openai-request-id", "x-correlation-id"):
+        value = _safe_provider_text(response.headers.get(header), limit=160)
+        if value and re.fullmatch(r"[A-Za-z0-9._:-]+", value):
+            details["provider_request_id"] = value
+            break
+
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        remaining = 8192 - len(body)
+        if remaining <= 0:
+            break
+        body.extend(chunk[:remaining])
+        if len(chunk) > remaining:
+            break
+    try:
+        payload = json.loads(body) if body else None
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = None
+    if not isinstance(payload, dict):
+        return details
+
+    error = payload.get("error", payload)
+    if not isinstance(error, dict):
+        return details
+    for source, target in (("code", "provider_error_code"), ("type", "provider_error_type")):
+        value = _safe_provider_text(error.get(source), limit=100)
+        if value and re.fullmatch(r"[A-Za-z0-9_.:-]+", value):
+            details[target] = value
+    message = _safe_provider_text(error.get("message"))
+    if message:
+        details["provider_error_message"] = message
+    return details
+
+
 class AIClient:
     def __init__(self, workbench, transport=None):
         self.w = workbench
@@ -281,20 +334,32 @@ class AIClient:
                 content=body,
                 timeout=limits["timeout_seconds"],
             ) as response:
-                if response.status_code in {401, 403}:
-                    raise AppError(503, "PROVIDER_AUTH_FAILED", "模型服务凭据或权限错误")
-                if response.status_code in {408, 429} or response.status_code >= 500:
-                    raise AppError(
-                        503,
-                        "PROVIDER_TEMPORARY_ERROR",
-                        "模型服务暂时不可用",
-                        retryable=True,
-                        details={
-                            "retry_after_ms": retry_after(response.headers.get("Retry-After"), self.w.now())
-                        },
-                    )
                 if response.status_code != 200:
-                    raise AppError(422, "PROVIDER_REQUEST_REJECTED", "模型服务拒绝请求，请检查已验证配置")
+                    details = await provider_error_details(response)
+                    if response.status_code in {401, 403}:
+                        raise AppError(
+                            503,
+                            "PROVIDER_AUTH_FAILED",
+                            "模型服务凭据或权限错误",
+                            details=details,
+                        )
+                    if response.status_code in {408, 429} or response.status_code >= 500:
+                        details["retry_after_ms"] = retry_after(
+                            response.headers.get("Retry-After"), self.w.now()
+                        )
+                        raise AppError(
+                            503,
+                            "PROVIDER_TEMPORARY_ERROR",
+                            "模型服务暂时不可用",
+                            retryable=True,
+                            details=details,
+                        )
+                    raise AppError(
+                        422,
+                        "PROVIDER_REQUEST_REJECTED",
+                        "模型服务拒绝请求，请检查已验证配置",
+                        details=details,
+                    )
                 received = bytearray()
                 async for chunk in response.aiter_bytes():
                     received.extend(chunk)
@@ -317,8 +382,14 @@ class AIClient:
                     raise
                 except (KeyError, IndexError, TypeError, ValueError, ValidationError):
                     raise AppError(422, "INVALID_MODEL_OUTPUT", "模型响应不符合结构化契约") from None
-        except (httpx.HTTPError, OSError, TimeoutError):
-            error = AppError(503, "PROVIDER_TIMEOUT", "模型请求失败或超时，用量可能未知", retryable=True)
+        except (httpx.HTTPError, OSError, TimeoutError) as exc:
+            error = AppError(
+                503,
+                "PROVIDER_TIMEOUT",
+                "模型请求失败或超时，用量可能未知",
+                retryable=True,
+                details={"provider_transport_error": type(exc).__name__},
+            )
             raise error from None
         except AppError as exc:
             error = exc
