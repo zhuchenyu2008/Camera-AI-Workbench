@@ -20,6 +20,20 @@ from app.repositories.db import new_id, one
 from app.security.secrets import safe_path
 
 
+def classify_ffmpeg_error(text: str) -> tuple[str, str] | None:
+    """把 FFmpeg 的常见取流错误转换成不泄露地址或凭据的用户提示。"""
+    lower = text.lower()
+    if "401 unauthorized" in lower or "401unauthorized" in lower or "authorization failed" in lower:
+        return "RTSP_AUTH_FAILED", "RTSP 认证失败，请检查用户名、密码和账号权限"
+    if "404 not found" in lower or "method describe failed: 404" in lower:
+        return "RTSP_PATH_NOT_FOUND", "RTSP 路径不存在，请检查路径配置"
+    if "connection refused" in lower or "connection timed out" in lower or "error number -138" in lower:
+        return "RTSP_CONNECT_FAILED", "无法连接摄像头 RTSP 服务，请检查地址和端口"
+    if "could not find codec parameters" in lower or "does not contain any stream" in lower:
+        return "RTSP_NO_VIDEO", "RTSP 已连接，但没有可用的视频轨道"
+    return None
+
+
 def ffmpeg_args(config, source, password, output_dir, long_edge):
     credentials = ""
     if source.get("username"):
@@ -87,6 +101,7 @@ class Stream:
     sequence: int = 0
     dropped: int = 0
     codec: str | None = None
+    ffmpeg_error: tuple[str, str] | None = None
     detector: Detector | None = None
     stopped: bool = False
 
@@ -177,6 +192,7 @@ class Supervisor:
                     stream.codec = "h264"
                 elif "Video: hevc" in text:
                     stream.codec = "hevc"
+                stream.ffmpeg_error = classify_ffmpeg_error(text) or stream.ffmpeg_error
                 if "showinfo" in text:
                     match = re.search(r"\bn:\s*\d+.*?pts_time:\s*([-+\d.e]+)", text)
                     if match:
@@ -520,8 +536,26 @@ class Supervisor:
                         source_revision=camera["source_revision"],
                     )
                 )
+            frame_task = asyncio.create_task(stream.frames.get())
+            process_task = asyncio.create_task(process.wait())
             try:
-                jpeg, captured, pts, sequence = await asyncio.wait_for(stream.frames.get(), timeout=15)
+                done, _ = await asyncio.wait(
+                    {frame_task, process_task}, timeout=15, return_when=asyncio.FIRST_COMPLETED
+                )
+                if frame_task not in done:
+                    if process_task in done:
+                        # 进程退出后，尽量让 stderr 读取任务处理完最后一行。
+                        if stream.tasks and not stream.tasks[0].done():
+                            try:
+                                await asyncio.wait_for(asyncio.shield(stream.tasks[0]), timeout=0.2)
+                            except (TimeoutError, asyncio.CancelledError):
+                                pass
+                        if stream.ffmpeg_error:
+                            code, message = stream.ffmpeg_error
+                            raise AppError(503, code, message)
+                        raise AppError(503, "CAMERA_TEST_FAILED", "FFmpeg 已退出，未取得视频帧，请检查视频来源配置")
+                    raise AppError(503, "CAMERA_TEST_TIMEOUT", "15 秒内未取得测试图")
+                jpeg, captured, pts, sequence = frame_task.result()
                 row = await asyncio.to_thread(
                     self.writer.save, camera_id, sid, jpeg, captured, pts, sequence, is_test=True
                 )
@@ -533,9 +567,11 @@ class Supervisor:
                     "width": row["width"],
                     "height": row["height"],
                 }
-            except TimeoutError:
-                raise AppError(503, "CAMERA_TEST_TIMEOUT", "15 秒内未取得测试图") from None
             finally:
+                for task in (frame_task, process_task):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(frame_task, process_task, return_exceptions=True)
                 if process.returncode is None:
                     process.terminate()
                 await process.wait()

@@ -4,10 +4,11 @@ import asyncio
 import dataclasses
 import time
 
+import pytest
 from sqlalchemy import select, update
 
 from app.capture.recovery import CaptureRecovery
-from app.capture.supervisor import Supervisor
+from app.capture.supervisor import Supervisor, classify_ffmpeg_error
 from app.repositories import schema as s
 from app.repositories.db import one
 from tests.conftest import make_camera
@@ -90,3 +91,19 @@ def test_B01_B02_recovery_keeps_gaps_without_fabricating_images(w, clock):
         assert result["coverage"]["captured_ms"] == 0
         captures = list(conn.execute(select(s.minute_capture)).mappings())
         assert all(r["captured_bitmap"] == 0 and r["planned_bitmap"] == (1 << 60) - 1 for r in captures)
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("method DESCRIBE failed: 401Unauthorized", "RTSP_AUTH_FAILED"),
+        ("method DESCRIBE failed: 404 Not Found", "RTSP_PATH_NOT_FOUND"),
+        ("Connection refused", "RTSP_CONNECT_FAILED"),
+        ("Could not find codec parameters", "RTSP_NO_VIDEO"),
+    ],
+)
+def test_ffmpeg_error_classification_uses_safe_messages(line, expected):
+    result = classify_ffmpeg_error(line)
+    assert result is not None
+    assert result[0] == expected
+    assert "rtsp://" not in result[1]
