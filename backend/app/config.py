@@ -29,8 +29,9 @@ class Config:
     def from_env(cls) -> Config:
         data = Path(os.environ.get("CAW_DATA_DIR", "data")).resolve()
         key = Path(os.environ.get("CAW_MASTER_KEY_FILE", "/etc/camera-ai-workbench/master.key"))
-        origin = os.environ.get("CAW_ALLOWED_ORIGIN", "https://camera.example.com").rstrip("/")
         development_mode = os.environ.get("CAW_LOCAL_DEV") == "1"
+        default_origin = "http://127.0.0.1:5173" if development_mode else "https://camera.example.com"
+        origin = os.environ.get("CAW_ALLOWED_ORIGIN", default_origin).rstrip("/")
         parts = urlsplit(origin)
         local_http = (
             development_mode

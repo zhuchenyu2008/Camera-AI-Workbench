@@ -63,7 +63,7 @@ def test_local_mode_does_not_allow_remote_http_or_malformed_origins(monkeypatch,
 
 def test_local_development_mode_needs_no_network_allowlists(monkeypatch):
     monkeypatch.setenv("CAW_LOCAL_DEV", "1")
-    monkeypatch.setenv("CAW_ALLOWED_ORIGIN", "http://127.0.0.1:5173")
+    monkeypatch.delenv("CAW_ALLOWED_ORIGIN", raising=False)
     monkeypatch.setenv("CAW_RTSP_ALLOWED_HOSTS", "")
     monkeypatch.setenv("CAW_RTSP_ALLOWED_PORTS", "")
     monkeypatch.setenv("CAW_PROVIDER_ALLOWED_HOSTS", "")
@@ -72,6 +72,7 @@ def test_local_development_mode_needs_no_network_allowlists(monkeypatch):
     config = Config.from_env()
 
     assert config.development_mode
+    assert config.allowed_origin == "http://127.0.0.1:5173"
     assert config.rtsp_allowed_hosts == ()
     assert config.rtsp_allowed_ports == ()
     assert config.provider_allowed_hosts == ()
