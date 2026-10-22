@@ -1,0 +1,83 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["serve"]
+    env_file: .env
+    environment:
+      APP_DATA_DIR: /data
+      APP_DB_URL: sqlite:////data/db/app.sqlite3
+      APP_ALLOWED_ORIGIN: ${APP_ALLOWED_ORIGIN:-http://localhost:8000}
+      APP_ENV: ${APP_ENV:-production}
+      APP_MASTER_KEY_FILE: ${APP_MASTER_KEY_FILE:-/data/master.key}
+      APP_BOOTSTRAP_PASSWORD_FILE: ${APP_BOOTSTRAP_PASSWORD_FILE:-/data/bootstrap_password}
+      APP_AUTO_MIGRATE: ${APP_AUTO_MIGRATE:-true}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - camera_ai_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["worker"]
+    env_file: .env
+    environment:
+      APP_DATA_DIR: /data
+      APP_DB_URL: sqlite:////data/db/app.sqlite3
+      APP_ENV: ${APP_ENV:-production}
+      APP_MASTER_KEY_FILE: ${APP_MASTER_KEY_FILE:-/data/master.key}
+    volumes:
+      - camera_ai_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["scheduler"]
+    env_file: .env
+    environment:
+      APP_DATA_DIR: /data
+      APP_DB_URL: sqlite:////data/db/app.sqlite3
+      APP_ENV: ${APP_ENV:-production}
+      APP_MASTER_KEY_FILE: ${APP_MASTER_KEY_FILE:-/data/master.key}
+    volumes:
+      - camera_ai_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  capture:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["capture"]
+    env_file: .env
+    environment:
+      APP_DATA_DIR: /data
+      APP_DB_URL: sqlite:////data/db/app.sqlite3
+      APP_ENV: ${APP_ENV:-production}
+      APP_MASTER_KEY_FILE: ${APP_MASTER_KEY_FILE:-/data/master.key}
+    volumes:
+      - camera_ai_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  camera_ai_data:

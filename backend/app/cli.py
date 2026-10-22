@@ -225,8 +225,16 @@ def run_service(mode: str, runner_args: Sequence[str] = ()) -> int:
 def _run_init(with_password: bool = False) -> int:
     settings = get_settings()
     settings.ensure_runtime_directories()
-    load_master_key(settings, create=True)
-    if with_password and settings.bootstrap_password is None and not settings.bootstrap_password_file.exists():
+    if settings.is_production:
+        load_master_key(settings, create=False)
+        password=settings.read_bootstrap_password()
+        if not password:
+            raise CLIError("生产环境必须通过 Secret 配置初始管理员密码，不会自动生成")
+        if len(password)<12:
+            raise CLIError("初始管理员密码至少需要 12 个字符")
+    else:
+        load_master_key(settings, create=True)
+    if with_password and not settings.is_production and settings.bootstrap_password is None and not settings.bootstrap_password_file.exists():
         import secrets
 
         settings.bootstrap_password_file.write_text(secrets.token_urlsafe(18), encoding="utf-8")
