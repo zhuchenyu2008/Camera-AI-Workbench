@@ -281,7 +281,10 @@ function Get-PythonLauncher {
         $seen += $candidate
 
         try {
-            $arguments = @('-c', 'import sys; print("%d.%d.%d" % sys.version_info[:3])')
+            # Windows PowerShell 5.1 removes embedded double quotes when invoking native
+            # executables. Keep this snippet free of quote characters so Python receives it
+            # unchanged (the old snippet caused `File "<string>", line 1`).
+            $arguments = @('-c', 'import sys; print(*sys.version_info[:3], sep=chr(46))')
             if ([IO.Path]::GetFileNameWithoutExtension($candidate).ToLowerInvariant() -eq 'py') {
                 $arguments = @('-3') + $arguments
             }
@@ -406,7 +409,8 @@ function Get-SqliteDatabasePath([string]$DatabaseUrl) {
 }
 
 function Get-PythonVersion([string]$PythonExe) {
-    $value = ((& $PythonExe -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>$null) | Out-String).Trim()
+    # Keep this code quote-free for Windows PowerShell 5.1 native argument handling.
+    $value = ((& $PythonExe -c 'import sys; print(*sys.version_info[:3], sep=chr(46))' 2>$null) | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $value -notmatch '^\d+\.\d+\.\d+$') {
         throw "无法读取 Python 版本：$PythonExe"
     }
@@ -652,8 +656,12 @@ function Get-AdminState([string]$PythonExe, [string]$DatabasePath) {
         return $false
     }
 
-    $checkCode = 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); names={r[0] for r in c.execute("select name from sqlite_master where type=''table''")}; print("yes" if "api_auth_users" in names and c.execute("select 1 from api_auth_users limit 1").fetchone() else "no"); c.close()'
-    $result = ((& $PythonExe -c $checkCode $DatabasePath 2>&1) | Out-String).Trim()
+    # Avoid quotes in the Python snippet: Windows PowerShell 5.1 strips embedded
+    # double quotes from arguments passed to native executables.
+    $checkCode = 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); names={r[0] for r in c.execute(sys.argv[2])}; print(sys.argv[3] if sys.argv[4] in names and c.execute(sys.argv[5]).fetchone() else sys.argv[6]); c.close()'
+    $tableQuery = 'select name from sqlite_master where type=char(116,97,98,108,101)'
+    $adminQuery = 'select 1 from api_auth_users limit 1'
+    $result = ((& $PythonExe -c $checkCode $DatabasePath $tableQuery 'yes' 'api_auth_users' $adminQuery 'no' 2>&1) | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $result -notin @('yes', 'no')) {
         throw "无法检查本地管理员账户状态：$result"
     }
