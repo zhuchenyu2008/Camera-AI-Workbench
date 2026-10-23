@@ -436,6 +436,24 @@ function Get-NodeVersion([string]$NodeExe) {
     return $value.TrimStart('v')
 }
 
+function Test-NativeCommand([string]$Executable, [string[]]$Arguments) {
+    # Windows PowerShell 5.1 turns native stderr into terminating errors when the
+    # script uses $ErrorActionPreference = 'Stop'. Dependency checks intentionally
+    # probe commands that may fail, so convert those failures into a Boolean result.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Executable @Arguments 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+}
+
 function Assert-NodeVersion([string]$NodeExe) {
     $version = Get-NodeVersion -NodeExe $NodeExe
     $parts = $version -split '\.'
@@ -513,15 +531,12 @@ function Test-BackendDependencies([string]$PythonExe) {
 
     Push-Location -LiteralPath $BackendDir
     try {
-        & $PythonExe -m pip check 2>$null | Out-Null
-        $pipExit = $LASTEXITCODE
-        if ($pipExit -ne 0) {
+        if (-not (Test-NativeCommand -Executable $PythonExe -Arguments @('-m', 'pip', 'check'))) {
             return $false
         }
 
         $importCode = 'import app.cli, app.config, app.health, app.main, app.worker_main, argon2, alembic, cryptography, fastapi, httpx, multipart, numpy, PIL, pydantic, pydantic_settings, sqlalchemy, uvicorn'
-        & $PythonExe -c $importCode 2>$null | Out-Null
-        return ($LASTEXITCODE -eq 0)
+        return (Test-NativeCommand -Executable $PythonExe -Arguments @('-c', $importCode))
     }
     finally {
         Pop-Location
@@ -547,21 +562,17 @@ function Test-FrontendDependencies([string]$NodeExe, [string]$NpmExe, [string]$V
         return $false
     }
 
-    $npmExit = 1
     Push-Location -LiteralPath $FrontendDir
     try {
-        & $NpmExe ls --depth=0 2>$null | Out-Null
-        $npmExit = $LASTEXITCODE
+        if (-not (Test-NativeCommand -Executable $NpmExe -Arguments @('ls', '--depth=0'))) {
+            return $false
+        }
     }
     finally {
         Pop-Location
     }
-    if ($npmExit -ne 0) {
-        return $false
-    }
 
-    & $NodeExe $ViteCli --version 2>$null | Out-Null
-    return ($LASTEXITCODE -eq 0)
+    return (Test-NativeCommand -Executable $NodeExe -Arguments @($ViteCli, '--version'))
 }
 
 function Test-PythonRuntime([string]$PythonExe) {
