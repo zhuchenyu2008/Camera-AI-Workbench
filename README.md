@@ -147,7 +147,7 @@ Windows 本地开发无需 Docker。仓库根目录运行（也可以双击 `sta
 4. 首次运行时安装前端依赖，然后启动 API、Worker、Scheduler、Capture 和 Vite 前端。
 5. 等待 API 与前端就绪后自动打开浏览器，地址为 <http://localhost:5173>。
 
-前置条件：Python 3.11+、Node.js 20.19+ 或 22.12+、npm。若要接入真实摄像头，还需要 FFmpeg 并加入 `PATH`。首次安装依赖需要网络；之后再启动会直接复用已准备好的环境。
+前置条件：Python 3.11+、Node.js 20.19+ 或 22.12+、npm。若要接入真实摄像头，还需要 FFmpeg 并加入 `PATH`。一键脚本会直接读取 `backend/pyproject.toml` 安装 Python 运行与开发依赖，不会先构建 editable 包；首次安装依赖仍需要网络，之后再启动会直接复用已准备好的环境。
 
 停止所有由脚本启动的进程：
 

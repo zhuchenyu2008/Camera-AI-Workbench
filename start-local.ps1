@@ -618,6 +618,76 @@ function New-BackendVirtualEnvironment([string]$PythonLauncher) {
     }
 }
 
+function Get-BackendDependencySpecs {
+    $pyprojectPath = Join-Path $BackendDir 'pyproject.toml'
+    if (-not (Test-Path -LiteralPath $pyprojectPath)) {
+        throw "缺少后端项目配置：$pyprojectPath"
+    }
+
+    # The launcher only needs the dependencies to run from backend/; installing
+    # the editable project itself would make pip create an isolated build env and
+    # download setuptools/wheel again. Read both dependency lists directly from
+    # pyproject.toml so the one-click path does not depend on build tooling.
+    $section = ''
+    $collect = $false
+    $specs = @()
+    foreach ($line in Get-Content -LiteralPath $pyprojectPath) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed) {
+            continue
+        }
+
+        if ($trimmed -match '^\[([^]]+)\]$') {
+            $section = $matches[1]
+            $collect = $false
+            continue
+        }
+
+        if ($section -eq 'project' -and $trimmed -eq 'dependencies = [') {
+            $collect = $true
+            continue
+        }
+        if ($section -eq 'project.optional-dependencies' -and $trimmed -eq 'dev = [') {
+            $collect = $true
+            continue
+        }
+        if (-not $collect) {
+            continue
+        }
+        if ($trimmed -eq ']') {
+            $collect = $false
+            continue
+        }
+        if ($trimmed -match '^"([^"]+)"[,]?$') {
+            $specs += $matches[1]
+        }
+    }
+
+    if ($specs.Count -eq 0) {
+        throw "未能从 $pyprojectPath 读取 Python 依赖。"
+    }
+    return @($specs)
+}
+
+function Install-BackendDependencies([string]$PythonExe) {
+    $specs = Get-BackendDependencySpecs
+    Write-Host '正在从 backend/pyproject.toml 安装运行与开发依赖；无需构建 editable 包。' -ForegroundColor DarkGray
+
+    $arguments = @(
+        '-m', 'pip', 'install',
+        '--disable-pip-version-check',
+        '--prefer-binary',
+        '--retries', '2',
+        '--timeout', '30'
+    ) + $specs
+    try {
+        Invoke-Checked -Executable $PythonExe -Arguments $arguments -WorkingDirectory $BackendDir
+    }
+    catch {
+        throw "后端依赖安装失败。若上方出现 WinError 10013、连接超时或 No matching distribution，请检查防火墙、代理或 PIP_INDEX_URL。原始错误：$($_.Exception.Message)"
+    }
+}
+
 function Ensure-Dependencies([string]$PythonLauncher, [string]$NodeExe, [string]$NpmExe) {
     New-BackendVirtualEnvironment -PythonLauncher $PythonLauncher
     $pythonVersion = Assert-PythonVersion -PythonExe $VenvPython
@@ -643,7 +713,7 @@ function Ensure-Dependencies([string]$PythonLauncher, [string]$NodeExe, [string]
     $markerChanged = -not $markerValid
     if (-not $backendReady -or $markerChanged) {
         Write-Title '安装后端依赖'
-        Invoke-Checked -Executable $VenvPython -Arguments @('-m', 'pip', 'install', '-e', '.[dev]') -WorkingDirectory $BackendDir
+        Install-BackendDependencies -PythonExe $VenvPython
     }
     if (-not $frontendReady -or $markerChanged) {
         Write-Title '安装前端依赖'
