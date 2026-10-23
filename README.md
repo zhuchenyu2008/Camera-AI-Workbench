@@ -131,57 +131,61 @@ docker compose down
 
 > `docker compose down -v` 会删除 Compose 数据卷，请在确认已有备份后再执行。
 
-## 本地开发
+## 本地开发：一键启动
 
-本地开发需要 Python 3.11+、Node.js/npm；如果要接入真实摄像头，还需要 FFmpeg 并加入 `PATH`。
+Windows 本地开发无需 Docker。仓库根目录运行（也可以双击 `start-local.cmd`）：
 
-### 1. 安装后端依赖
+```powershell
+.\start-local.ps1
+```
+
+脚本会自动：
+
+1. 首次运行时创建 Python 虚拟环境并安装后端依赖；依赖清单更新后再自动更新。
+2. 在缺少 `backend/.env` 时从根目录 `.env.example` 复制一份，不会覆盖已有本地配置。
+3. 初始化本地密钥和 SQLite 数据库；全新数据库会生成初始管理员密码并在终端显示。
+4. 首次运行时安装前端依赖，然后启动 API、Worker、Scheduler、Capture 和 Vite 前端。
+5. 等待 API 与前端就绪后自动打开浏览器，地址为 <http://localhost:5173>。
+
+前置条件：Python 3.11+、Node.js 20.19+ 或 22.12+、npm。若要接入真实摄像头，还需要 FFmpeg 并加入 `PATH`。首次安装依赖需要网络；之后再启动会直接复用已准备好的环境。
+
+停止所有由脚本启动的进程：
+
+```powershell
+.\start-local.ps1 -Stop
+```
+
+启动日志保存在 `.local-dev/logs/`；如浏览器未自动打开，可手动访问 <http://localhost:5173>。首次打印的 `admin` 初始密码只在管理员尚未初始化时显示，请妥善保存，不要分享终端输出。脚本默认使用 5173（前端）和 8000（API）端口；重启时只会停止进程清单中身份匹配的旧进程。若端口仍被其他程序占用，脚本会停止启动并提示，不会关闭该程序。API 和前端会等待 HTTP 就绪；Worker、Scheduler、Capture 只记录进程已创建，不做服务级健康探测。依赖安装失败时可检查网络和日志；`-NoBrowser` 可仅启动服务而不打开浏览器，`-SkipInstall` 可跳过依赖安装（依赖检查仍会执行，且需要有效的依赖标记）。
+
+脚本创建的本地配置位于 `backend/.env`，可按需修改；下次启动不会覆盖它。更细粒度的手动启动方式如下。
+
+### 手动开发（可选）
+
+安装后端依赖、初始化数据库：
 
 ```powershell
 Set-Location backend
-py -3.11 -m venv .venv
+py -3 -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 Copy-Item ..\.env.example .env
-```
-
-本地配置中的 `APP_DATA_DIR=./data` 会将运行数据放在 `backend/data/`，该目录已被 Git 忽略。开发环境建议保留：
-
-```dotenv
-APP_ENV=development
-APP_ALLOWED_ORIGIN=http://localhost:5173
-APP_MASTER_KEY_FILE=./data/master.key
-APP_BOOTSTRAP_PASSWORD_FILE=./data/bootstrap_password
-```
-
-初始化数据库和管理员：
-
-```powershell
 .\.venv\Scripts\python -m app.cli init --with-password
-Get-Content .\data\bootstrap_password
 .\.venv\Scripts\python -m app.cli migrate
 ```
 
-启动 API（开发环境显式加载 `.env`）：
+启动 API：
 
 ```powershell
 .\.venv\Scripts\python -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8000
 ```
 
-### 2. 启动前端
-
-另开终端，在仓库根目录执行：
+另开终端，在 `frontend/` 安装并启动前端：
 
 ```powershell
-Set-Location frontend
-npm ci
+npm install --no-audit --no-fund
 npm run dev
 ```
 
-打开 <http://localhost:5173>。Vite 会把 `/api` 和 `/health` 代理到 `http://127.0.0.1:8000`。
-
-### 3. 启动后台服务
-
-如果需要真实采集和自动分析，请在 `backend` 目录分别打开终端运行：
+需要真实采集和自动分析时，再在 `backend/` 目录分别运行：
 
 ```powershell
 .\.venv\Scripts\python -m app.cli worker
@@ -189,7 +193,7 @@ npm run dev
 .\.venv\Scripts\python -m app.cli capture
 ```
 
-最小联调只需要 API + 前端；没有 `worker`、`scheduler` 或 `capture` 时，对应的任务、周期总结或实时采集不会自动推进。
+没有后台进程时，对应的任务、周期总结和实时采集不会自动推进。
 
 ## 配置说明
 
@@ -215,11 +219,12 @@ Provider 的 API Key 和摄像头 RTSP 凭据只在后端保存，并使用主�
 
 ## 数据目录与留存
 
-默认数据目录结构如下：
+本地一键启动脚本默认使用 `backend/data/`；Docker Compose 容器内使用 `/data`。默认数据目录结构如下：
 
 ```text
-data/
-├─ db/app.sqlite3       # SQLite 数据库
+backend/data/
+├─ app.sqlite3          # 本地开发默认 SQLite 数据库
+├─ db/                  # Compose 或自定义配置可使用的数据库目录
 ├─ frames/              # 原始 JPEG 帧
 ├─ thumbs/              # 缩略图
 ├─ backups/             # 备份包

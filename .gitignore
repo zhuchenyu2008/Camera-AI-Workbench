@@ -31,3 +31,6 @@ reports/
 
 # Temporary local archive used only for implementation reference
 /backend-legacy/
+
+# Local launcher runtime files and logs
+.local-dev/
