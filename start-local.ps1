@@ -271,6 +271,37 @@ function Get-ExecutablePath([string[]]$Names) {
     return $null
 }
 
+function Get-PythonLauncher {
+    $seen = @()
+    foreach ($name in @('python.exe', 'python', 'python3.exe', 'python3', 'py.exe', 'py')) {
+        $candidate = Get-ExecutablePath -Names @($name)
+        if (-not $candidate -or $seen -contains $candidate) {
+            continue
+        }
+        $seen += $candidate
+
+        try {
+            $arguments = @('-c', 'import sys; print("%d.%d.%d" % sys.version_info[:3])')
+            if ([IO.Path]::GetFileNameWithoutExtension($candidate).ToLowerInvariant() -eq 'py') {
+                $arguments = @('-3') + $arguments
+            }
+            $version = ((& $candidate @arguments 2>$null) | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') {
+                continue
+            }
+            $parts = $version -split '\.'
+            $major = [int]$parts[0]
+            $minor = [int]$parts[1]
+            if (($major -gt 3) -or (($major -eq 3) -and ($minor -ge 11))) {
+                return $candidate
+            }
+        }
+        catch {
+        }
+    }
+    return $null
+}
+
 function Ensure-BackendEnv {
     if (Test-Path -LiteralPath $BackendEnvPath) {
         return
@@ -529,23 +560,46 @@ function Test-FrontendDependencies([string]$NodeExe, [string]$NpmExe, [string]$V
     return ($LASTEXITCODE -eq 0)
 }
 
+function Test-PythonRuntime([string]$PythonExe) {
+    if (-not (Test-Path -LiteralPath $PythonExe)) {
+        return $false
+    }
+    try {
+        $null = Assert-PythonVersion -PythonExe $PythonExe
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
 function New-BackendVirtualEnvironment([string]$PythonLauncher) {
-    if (Test-Path -LiteralPath $VenvPython) {
+    $environmentExists = Test-Path -LiteralPath $VenvPython
+    if ($environmentExists -and (Test-PythonRuntime -PythonExe $VenvPython)) {
         return
     }
     if ($SkipInstall) {
+        if ($environmentExists) {
+            throw "backend/.venv 已存在但无法运行；-SkipInstall 不会修复虚拟环境，请先不带 -SkipInstall 运行一次。"
+        }
         throw "缺少 Python 虚拟环境：$VenvDir；-SkipInstall 不会创建或安装依赖。"
     }
 
-    Write-Host '正在创建 backend/.venv …' -ForegroundColor Yellow
-    if ([IO.Path]::GetFileNameWithoutExtension($PythonLauncher).ToLowerInvariant() -eq 'py') {
-        Invoke-Checked -Executable $PythonLauncher -Arguments @('-3', '-m', 'venv', $VenvDir) -WorkingDirectory $BackendDir
+    if ($environmentExists) {
+        Write-Host '检测到不可用的 backend/.venv，正在使用当前 Python 自动重建 …' -ForegroundColor Yellow
     }
     else {
-        Invoke-Checked -Executable $PythonLauncher -Arguments @('-m', 'venv', $VenvDir) -WorkingDirectory $BackendDir
+        Write-Host '正在创建 backend/.venv …' -ForegroundColor Yellow
     }
-    if (-not (Test-Path -LiteralPath $VenvPython)) {
-        throw "Python 虚拟环境创建失败：$VenvPython"
+
+    $arguments = @('-m', 'venv', '--clear', $VenvDir)
+    if ([IO.Path]::GetFileNameWithoutExtension($PythonLauncher).ToLowerInvariant() -eq 'py') {
+        $arguments = @('-3') + $arguments
+    }
+    Invoke-Checked -Executable $PythonLauncher -Arguments $arguments -WorkingDirectory $BackendDir
+
+    if (-not (Test-Path -LiteralPath $VenvPython) -or -not (Test-PythonRuntime -PythonExe $VenvPython)) {
+        throw "Python 虚拟环境创建失败或无法运行：$VenvPython。请确认 Python 3.11+ 已正确安装。"
     }
 }
 
@@ -744,11 +798,11 @@ try {
     Ensure-BackendEnv
     Import-BackendEnvironment -Path $BackendEnvPath
 
-    $pythonLauncher = Get-ExecutablePath -Names @('py.exe', 'py', 'python.exe', 'python')
+    $pythonLauncher = Get-PythonLauncher
     $nodeExe = Get-ExecutablePath -Names @('node.exe', 'node')
     $npmExe = Get-ExecutablePath -Names @('npm.cmd', 'npm')
     if (-not $pythonLauncher) {
-        throw '未找到 Python。请安装 Python 3.11+ 并确保 py.exe 或 python.exe 在 PATH 中。'
+        throw '未找到可用的 Python 3.11+。请安装 Python 3.11+，并确保 python.exe 或 py.exe 在 PATH 中。'
     }
     if (-not $nodeExe -or -not $npmExe) {
         throw '未找到 Node.js 或 npm。请安装 Node.js 20.19+ / 22.12+ 并确保 node 与 npm 在 PATH 中。'
