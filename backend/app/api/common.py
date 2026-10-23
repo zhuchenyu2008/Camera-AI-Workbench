@@ -137,7 +137,7 @@ def job_dto(j):
       "input_frame_count":len(j.input_frame_ids_json or []),"created_at":iso(j.created_at_ms)}
 def segment_dto(s):
     return {"id":s.id,"camera_id":s.camera_id,"l2_window_id":s.l2_window_id,
-      "start":iso(s.start_at_ms),"end":iso(s.end_at_ms),"canonical_activity_id":s.canonical_activity_id,
+      "start":iso(s.start_at_ms),"end":iso(s.end_at_ms),"duration_ms":max(0,s.end_at_ms-s.start_at_ms),"canonical_activity_id":s.canonical_activity_id,
       "canonical_activity":s.canonical_activity.name if s.canonical_activity else None,
       "display_description":s.display_description,"category":s.category,"confidence":s.confidence,
       "evidence_coverage":s.evidence_coverage,"state":s.state,"locked":s.locked,"version":s.version,

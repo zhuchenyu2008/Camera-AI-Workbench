@@ -293,6 +293,7 @@ class SegmentDto(LooseModel):
     camera_id: str
     start: datetime
     end: datetime
+    duration_ms: int | None = Field(default=None, ge=0)
     canonical_activity_id: str | None = None
     canonical_activity: str | None = None
     display_description: str | None = None

@@ -80,3 +80,21 @@ def test_provider_policy_rejects_private_network_by_default():
     import pytest
     from app.ai_gateway import validate_provider_url
     with pytest.raises(ProviderError):validate_provider_url("http://127.0.0.1:9000/v1",allowed_hosts=("127.0.0.1",))
+
+
+def test_segment_response_includes_server_calculated_duration():
+    from types import SimpleNamespace
+    from app.api.common import segment_dto
+    from app.schemas import SegmentDto
+
+    segment = SimpleNamespace(
+        id="segment-1", camera_id="camera-1", l2_window_id=None,
+        start_at_ms=1_800_000_000_000, end_at_ms=1_800_000_123_456,
+        canonical_activity_id=None, canonical_activity=None,
+        display_description=None, category=None, confidence=None,
+        evidence_coverage=None, state="final", locked=False, version=1,
+        source_observation_ids_json=[], intervals=[],
+    )
+    payload = segment_dto(segment)
+    assert payload["duration_ms"] == 123_456
+    assert SegmentDto.model_validate(payload).duration_ms == 123_456
