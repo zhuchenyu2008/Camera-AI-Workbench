@@ -177,7 +177,7 @@ async def test_provider(provider_id:str,payload:ProviderTestRequest,request:Requ
         "json_mode":result.capabilities.json_mode_support,"usage":result.capabilities.usage_support,
         "model":binding.model_name,"last_test_at_ms":utc_now_ms(),"latency_ms":result.latency_ms,
         "last_test_error":result.code}
-  p.capability_json=caps;db.commit()
+  p.capability_json=caps
   audit(db,request,"provider.connection_test","provider",p.id,{"result":result.ok,"code":result.code});db.commit()
   return ok({"ok":result.ok,"provider_id":p.id,"model":binding.model_name,"capabilities":caps,
              "error":({"code":result.code,"message":result.message} if not result.ok else None)})
