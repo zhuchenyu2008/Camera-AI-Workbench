@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import time
 from abc import ABC, abstractmethod
@@ -294,8 +295,12 @@ class FFmpegCameraSource(CameraSource):
         if not self.config.url:
             raise ValueError("FFmpeg RTSP source 需要 url")
         import subprocess
+        # Keep the command compatible with the FFmpeg builds commonly shipped
+        # on Windows.  ``-rw_timeout`` is not available in some builds and
+        # makes FFmpeg exit before it even opens the RTSP URL.  The reader's
+        # bounded wait and ``stop()`` provide the connection/read timeout.
         command = [self.ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-nostdin", "-rtsp_transport", "tcp",
-                   "-rw_timeout", str(int(self.config.read_timeout_s * 1_000_000)), "-i", self.config.url, "-an"]
+                   "-i", self.config.url, "-an"]
         fps_value = self.config.source_options.get("fps")
         if fps_value is not None:
             try:
@@ -331,6 +336,7 @@ class FFmpegCameraSource(CameraSource):
             return None
         try:
             from io import BytesIO
+
             from PIL import Image
             image = np.asarray(Image.open(BytesIO(payload)).convert("RGB"))
         except Exception as exc:
@@ -360,14 +366,12 @@ class FFmpegCameraSource(CameraSource):
 def _read_jpeg_from_stream(stream: Any, timeout_s: float) -> bytes | None:
     if stream is None:
         return None
-    import select
-    if hasattr(stream, "fileno"):
-        ready, _, _ = select.select([stream], [], [], max(0.0, timeout_s))
-        if not ready:
-            return None
     data = bytearray()
     deadline = time.monotonic() + max(0.1, timeout_s)
     while time.monotonic() < deadline:
+        remaining = max(0.0, deadline - time.monotonic())
+        if not _wait_for_stream_data(stream, remaining):
+            return bytes(data) if data else None
         chunk = stream.read(4096)
         if not chunk:
             return bytes(data) if data else None
@@ -378,6 +382,68 @@ def _read_jpeg_from_stream(stream: Any, timeout_s: float) -> bytes | None:
             if end >= 0:
                 return bytes(data[start:end + 2])
     return None
+
+
+def _wait_for_stream_data(stream: Any, timeout_s: float) -> bool:
+    """Wait until an FFmpeg stdout pipe can be read on POSIX and Windows."""
+
+    if not hasattr(stream, "fileno"):
+        return True
+    if os.name != "nt":
+        import select
+
+        ready, _, _ = select.select([stream], [], [], max(0.0, timeout_s))
+        return bool(ready)
+    return _wait_for_windows_pipe(stream, timeout_s)
+
+
+def _wait_for_windows_pipe(stream: Any, timeout_s: float) -> bool:
+    """Poll a Windows anonymous pipe without using ``select`` on a pipe handle."""
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    try:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (AttributeError, OSError, ValueError):
+        return True
+    if handle == -1:
+        return True
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    peek_named_pipe = kernel32.PeekNamedPipe
+    peek_named_pipe.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    peek_named_pipe.restype = wintypes.BOOL
+
+    deadline = time.monotonic() + max(0.0, timeout_s)
+    while True:
+        available = wintypes.DWORD()
+        ok = peek_named_pipe(
+            wintypes.HANDLE(handle),
+            None,
+            0,
+            None,
+            ctypes.byref(available),
+            None,
+        )
+        if not ok:
+            # A closed/broken pipe will make read() return EOF; let the caller
+            # handle that rather than reporting a platform-specific error.
+            return True
+        if available.value:
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.01, remaining))
 
 
 async def iter_source(source: CameraSource, stop_event: asyncio.Event | None = None) -> AsyncIterator[CaptureFrame]:

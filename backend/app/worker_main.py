@@ -6,6 +6,7 @@ CLI 所需的 ``run_worker``、``run_scheduler``、``run_capture``，也暴露�
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -990,6 +991,10 @@ def _capture_config_signature(state: dict[str, Any] | None) -> tuple[Any, ...] |
 
 async def _capture_camera(camera_id: str, data_dir: Path, stop: asyncio.Event | None = None) -> None:
     settings = _settings()
+    # FrameStorage resolves its root to an absolute path.  Normalize the
+    # worker's copy too, otherwise Path.relative_to() fails on Windows when
+    # APP_DATA_DIR is the default relative ``data`` path.
+    data_dir = Path(data_dir).expanduser().resolve()
     stop = stop or asyncio.Event()
     factory = get_session_factory()
     db = factory()
