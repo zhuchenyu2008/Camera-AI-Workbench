@@ -20,6 +20,39 @@ export type Camera = {
   version?: number
 }
 
+export type LatestFrameState = 'fresh' | 'stale' | 'offline' | 'unavailable' | string
+
+export type LatestFrame = {
+  camera_id: string
+  frame: EvidenceFrame | null
+  state: LatestFrameState
+  age_ms?: number | null
+  stale_after_ms?: number | null
+  camera_status?: CameraStatus | null
+}
+
+export type AuditLog = {
+  id: string
+  actor_id?: string | null
+  action: string
+  target_type?: string | null
+  target_id?: string | null
+  request_id?: string | null
+  details: Record<string, unknown>
+  created_at: string
+}
+
+export type BackupInfo = {
+  name: string
+  size_bytes: number
+  created_at?: string | null
+  includes_images?: boolean | null
+  image_file_count?: number | null
+  integrity?: string | null
+  verified?: boolean
+  error?: string
+}
+
 export type ActivityInterval = {
   id?: string
   start: string

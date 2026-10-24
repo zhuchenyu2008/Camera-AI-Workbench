@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session,selectinload
 from app.main import get_db
 from app.models import ActivitySegment,ActivityInterval,ActivityCatalog,CameraGap,MinuteObservation,L2Window,Frame,Summary,UserEdit,utc_now_ms
 from app.schemas import SegmentEditRequest,SegmentSplitRequest,SegmentMergeRequest,SegmentReprocessRequest,FrameFavoriteRequest
-from .common import fail,ok,require_session,require_write,ms,iso,ensure_segment,segment_dto,frame_dto,publish,encode_cursor,decode_cursor
+from .common import fail,ok,require_session,require_write,ms,iso,ensure_segment,segment_dto,frame_dto,publish,encode_cursor,decode_cursor,audit
 router=APIRouter()
 def _time(v):return ms(v)
 def _obs(o):return {"id":o.id,"camera_id":o.camera_id,"start":iso(o.start_at_ms),"end":iso(o.end_at_ms),"source":o.source,
@@ -87,6 +87,7 @@ def edit_segment(segment_id:str,payload:SegmentEditRequest,request:Request,db:Se
   if field in data:setattr(s,field,data[field])
  s.version+=1;s.state="final";s.updated_at_ms=utc_now_ms();after=segment_dto(s)
  db.add(UserEdit(target_type="segment",target_id=s.id,operation="edit",before_json=before,after_json=after,reason=payload.edit_reason))
+ audit(db,request,"segment.update","segment",s.id,{"version":s.version,"reason":payload.edit_reason})
  db.execute(update(Summary).where(Summary.camera_id==s.camera_id,Summary.period_start_ms<s.end_at_ms,Summary.period_end_ms>s.start_at_ms).values(stale=True,state="stale",updated_at_ms=utc_now_ms()))
  db.commit();publish(request,"timeline.updated",{"camera_id":s.camera_id,"segment_id":s.id,"start":iso(s.start_at_ms),"end":iso(s.end_at_ms),"version":s.version},s.camera_id)
  return ok(after)
@@ -108,7 +109,7 @@ def split_segment(segment_id:str,payload:SegmentSplitRequest,request:Request,db:
    end=interval.end_at_ms;interval.end_at_ms=point
    db.add(ActivityInterval(segment=right,start_at_ms=point,end_at_ms=end,evidence_kind=interval.evidence_kind,confidence=interval.confidence,
     reason=interval.reason,anchor_frame_ids_json=interval.anchor_frame_ids_json))
- db.add(right);db.add(UserEdit(target_type="segment",target_id=s.id,operation="split",before_json=old,after_json={"end":iso(point),"right_id":right.id},reason=payload.reason))
+ db.add(right);db.add(UserEdit(target_type="segment",target_id=s.id,operation="split",before_json=old,after_json={"end":iso(point),"right_id":right.id},reason=payload.reason));audit(db,request,"segment.split","segment",s.id,{"right_id":right.id,"reason":payload.reason})
  db.commit();return ok({"segments":[segment_dto(s),segment_dto(right)]},status=201)
 @router.post("/segments/merge",status_code=201)
 def merge_segments(payload:SegmentMergeRequest,request:Request,db:Session=Depends(get_db),_=Depends(require_write)):
@@ -127,10 +128,10 @@ def merge_segments(payload:SegmentMergeRequest,request:Request,db:Session=Depend
  for x in items:
   for interval in x.intervals:db.add(ActivityInterval(segment_id=merged.id,start_at_ms=interval.start_at_ms,end_at_ms=interval.end_at_ms,evidence_kind=interval.evidence_kind,
    confidence=interval.confidence,reason=interval.reason,anchor_frame_ids_json=interval.anchor_frame_ids_json))
-  db.add(UserEdit(target_type="segment",target_id=x.id,operation="merged_into",after_json={"segment_id":merged.id},reason=payload.reason));db.delete(x)
+  db.add(UserEdit(target_type="segment",target_id=x.id,operation="merged_into",after_json={"segment_id":merged.id},reason=payload.reason));audit(db,request,"segment.merge","segment",x.id,{"merged_into":merged.id,"reason":payload.reason});db.delete(x)
  db.commit();return ok(segment_dto(merged),status=201)
 @router.post("/segments/{segment_id}/reprocess",status_code=202)
-def reprocess_segment(segment_id:str,payload:SegmentReprocessRequest,db:Session=Depends(get_db),_=Depends(require_write),idempotency_key:str|None=Header(default=None,alias="Idempotency-Key")):
+def reprocess_segment(segment_id:str,payload:SegmentReprocessRequest,request:Request,db:Session=Depends(get_db),_=Depends(require_write),idempotency_key:str|None=Header(default=None,alias="Idempotency-Key")):
  from app.models import AIJob
  s=ensure_segment(db,segment_id);start=_time(payload.from_) if payload.from_ else s.start_at_ms;end=_time(payload.to) if payload.to else s.end_at_ms
  if end<=start:fail(422,"INVALID_TIME_RANGE","重新分析时间范围无效")
@@ -139,7 +140,7 @@ def reprocess_segment(segment_id:str,payload:SegmentReprocessRequest,db:Session=
  if job is None:
   job=AIJob(idempotency_key=key,layer="L2",camera_id=s.camera_id,period_start_ms=start,period_end_ms=end,priority=350,
    input_version=s.version,prompt_version="v1",schema_version="v1",input_frame_ids_json=[],input_ref_json={"segment_id":s.id,"reason":payload.reason})
-  db.add(job);db.commit()
+  db.add(job);audit(db,request,"segment.reprocess","segment",s.id,{"job_id":job.id,"reason":payload.reason});db.commit()
  from .common import job_dto
  return ok(job_dto(job),status=202)
 def _safe_frame_path(request:Request, relative_path:str|None, root_name:str):
@@ -165,5 +166,5 @@ def frame_thumbnail(frame_id:str,request:Request,db:Session=Depends(get_db),_=De
 def favorite(frame_id:str,payload:FrameFavoriteRequest,request:Request,db:Session=Depends(get_db),_=Depends(require_write)):
  f=db.get(Frame,frame_id)
  if f is None:fail(404,"FRAME_NOT_FOUND","证据帧不存在")
- f.favorite=payload.favorite;db.commit();publish(request,"storage.updated",{"frame_id":f.id,"favorite":f.favorite},f.camera_id)
+ f.favorite=payload.favorite;audit(db,request,"frame.favorite","frame",f.id,{"favorite":f.favorite});db.commit();publish(request,"storage.updated",{"frame_id":f.id,"favorite":f.favorite},f.camera_id)
  return ok(frame_dto(f))

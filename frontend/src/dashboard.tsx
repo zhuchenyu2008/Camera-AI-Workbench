@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getCameras, getJobs, getOverview, getSummaries, getTimeline } from './api'
-import type { Camera, Job, Summary, TimelineSegment } from './types'
+import { getCameras, getJobs, getLatestFrame, getOverview, getSummaries, getTimeline } from './api'
+import type { Camera, Job, LatestFrame, Summary, TimelineSegment } from './types'
 import { categoryTone, formatBytes, formatDateTime, formatDuration, formatPercent, formatRelative, formatTime, statusLabel } from './utils'
 import { Button, DataState, EmptyState, ErrorNotice, Icon, PageHeading, SectionHeading, StatusPill } from './ui'
 import { useWorkspace } from './workspace'
@@ -72,13 +72,26 @@ export function DashboardPage() {
 
 function CameraRow({ camera, segments, timezone, latestJob }: { camera: Camera; segments: TimelineSegment[]; timezone: string; latestJob?: Job }) {
   const latest = [...segments].sort((a, b) => b.start.localeCompare(a.start))[0]
+  const preview = useQuery({ queryKey: ['camera-latest-frame', camera.id], queryFn: () => getLatestFrame(camera.id), refetchInterval: 60_000, staleTime: 15_000 })
   return <article className="camera-row">
+    <CameraPreview camera={camera} latest={preview.data} loading={preview.isPending} timezone={timezone} />
     <div className={`camera-glyph ${camera.status === 'online' ? 'camera-online' : camera.status === 'offline' ? 'camera-offline' : 'camera-warn'}`}><Icon name="camera" size={20} /></div>
     <div className="camera-main"><div className="camera-title"><Link to={`/timeline/${camera.id}`}>{camera.name}</Link><StatusPill status={camera.status} /></div><div className="camera-meta"><span>{camera.last_frame_at ? `最近帧 ${formatRelative(camera.last_frame_at, Date.now(), timezone)}` : '尚无成功采集帧'}</span><span className="meta-separator">·</span><span>{camera.sampling_interval_ms ? `采样间隔 ${(camera.sampling_interval_ms / 1000).toFixed(camera.sampling_interval_ms % 1000 ? 1 : 0)} 秒` : '采样间隔未知'}</span></div></div>
     <div className="camera-pipeline"><small>分析状态</small>{latestJob ? <div className="pipeline-status"><StatusPill status={latestJob.state} /> <span>{latestJob.layer ?? 'AI'} · {formatTime(latestJob.period_start, true, timezone)}</span></div> : <div className="pipeline-status"><span>{latest?.state === 'final' ? '第二层已整理' : latest?.state === 'provisional' ? '第一层临时观察' : latest ? statusLabel(latest.state) : camera.enabled ? '等待分析记录' : '采集已停用'}</span></div>}</div>
     <div className="camera-latest"><small>最近活动</small><strong>{latest?.canonical_activity ?? (latest ? '未知 / 证据不足' : '暂无记录')}</strong><span>{latest?.display_description || (latest ? '以服务端活动段为准' : '没有可展示的已生成活动')}</span></div>
     <div className="camera-actions"><Link className="icon-button" title="打开时间轴" aria-label={`打开${camera.name}时间轴`} to={`/timeline/${camera.id}`}><Icon name="external" size={17} /></Link></div>
   </article>
+}
+
+function CameraPreview({ camera, latest, loading, timezone }: { camera: Camera; latest?: LatestFrame; loading: boolean; timezone: string }) {
+  const frame = latest?.frame
+  const image = frame?.thumbnail_url || frame?.content_url || null
+  const label = latest?.state === 'stale' ? '画面已停滞' : latest?.state === 'offline' ? '摄像头离线' : latest?.state === 'unavailable' ? '等待首帧' : loading ? '读取画面…' : image ? '最新画面' : '暂无画面'
+  return <div className={`camera-preview preview-${latest?.state ?? 'unknown'}`} aria-label={`${camera.name}：${label}`}>
+    {image ? <img src={image} alt={`${camera.name} 最新画面`} loading="lazy" /> : <span className="camera-preview-empty"><Icon name="image" size={20} /></span>}
+    <span className="camera-preview-label">{label}</span>
+    {frame?.captured_at && <span className="camera-preview-time">{formatDateTime(frame.captured_at, { hour: '2-digit', minute: '2-digit', second: '2-digit' }, timezone)}</span>}
+  </div>
 }
 
 function TimelineStrip({ segment, camera, from, to, timezone }: { segment: TimelineSegment; camera: Camera; from: string; to: string; timezone: string }) {

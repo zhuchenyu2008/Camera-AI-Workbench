@@ -121,14 +121,45 @@ def require_write(request:Request,session=Depends(require_session)):
     if session is not None and not request.headers.get("Authorization","").lower().startswith("bearer "):
         request.app.state.auth.validate_csrf(session,request.headers.get("X-CSRF-Token"))
     return session
+_AUDIT_SECRET_KEYS = {
+    "password", "passwd", "secret", "token", "authorization", "cookie", "credential",
+    "api_key", "apikey", "rtsp_url", "url_ciphertext", "raw_image", "image_bytes", "payload",
+}
+
+
+def _redact_audit(value: Any, *, key: str | None = None, depth: int = 0) -> Any:
+    """Keep audit entries useful while making credential/image leakage difficult."""
+    if depth > 8:
+        return "<redacted>"
+    normalised = key.casefold().replace("-", "_") if key else ""
+    if normalised in _AUDIT_SECRET_KEYS or any(marker in normalised for marker in ("password", "api_key", "token")):
+        return "<redacted>"
+    if isinstance(value, dict):
+        return {str(k): _redact_audit(v, key=str(k), depth=depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_audit(item, depth=depth + 1) for item in value[:100]]
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return f"<binary-redacted:{len(value)}>"
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)[:512]
+
+
 def audit(db:Session,request:Request,action:str,target_type:str|None=None,target_id:str|None=None,details:dict|None=None):
+    session = getattr(request.state, "auth_session", None)
+    actor_id = None
+    if isinstance(session, dict):
+        actor_id = str(session.get("user_id") or session.get("username") or "") or None
+    elif request.app.state.config.auth_disabled:
+        actor_id = "local"
     db.add(AuditLog(action=action,target_type=target_type,target_id=target_id,
-      request_id=getattr(request.state,"request_id",None),details_json=details or {}))
+      admin_id=None,actor_id=actor_id,
+      request_id=getattr(request.state,"request_id",None),details_json=_redact_audit(details or {})))
 def camera_dto(c):
     return {"id":c.id,"name":c.name,"enabled":c.enabled,"status":c.status,
       "source_configured":bool(c.rtsp_url_encrypted),"source_host":None,
       "sampling_interval_ms":c.sampling_interval_ms,"frame_width":c.frame_width,"frame_height":c.frame_height,
-      "last_frame_at":iso(c.last_frame_at_ms),"created_at":iso(c.created_at_ms),"updated_at":iso(c.updated_at_ms),"version":1}
+      "last_frame_at":iso(c.last_frame_at_ms),"created_at":iso(c.created_at_ms),"updated_at":iso(c.updated_at_ms),"version":int(getattr(c,"config_version",1) or 1)}
 def job_dto(j):
     return {"id":j.id,"layer":j.layer,"camera_id":j.camera_id,"state":j.state,"priority":j.priority,
       "period_start":iso(j.period_start_ms),"period_end":iso(j.period_end_ms),"attempts":j.attempts,

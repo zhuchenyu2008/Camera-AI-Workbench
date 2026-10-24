@@ -615,6 +615,23 @@ class RetentionSettingsUpdate(StrictModel):
     expected_version: int | None = Field(default=None, ge=1)
 
 
+class BackupCreateRequest(StrictModel):
+    include_images: bool = False
+
+
+class BackupNameRequest(StrictModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class BackupCleanupRequest(StrictModel):
+    names: list[str] = Field(default_factory=list, max_length=100)
+
+
+class DiagnosticsActionRequest(StrictModel):
+    action: Literal["reconnect_camera", "retry_job"]
+    target_id: str = Field(min_length=1, max_length=128)
+
+
 class AnalysisSettingsDto(LooseModel):
     sampling_interval_ms: int = Field(default=1000, ge=100, le=60_000)
     stable_sample_seconds: int = Field(default=10, ge=1, le=120)

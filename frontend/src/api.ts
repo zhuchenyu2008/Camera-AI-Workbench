@@ -1,4 +1,4 @@
-import type { ActivityCatalogItem, AnalysisSettings, Binding, Camera, EvidenceFrame, Job, Overview, Person, Provider, RetentionSettings, Session, Summary, TimelineData, TimelineSegment, Usage } from './types'
+import type { ActivityCatalogItem, AnalysisSettings, AuditLog, BackupInfo, Binding, Camera, EvidenceFrame, Job, LatestFrame, Overview, Person, Provider, RetentionSettings, Session, Summary, TimelineData, TimelineSegment, Usage } from './types'
 
 const API_BASE = '/api/v1'
 let csrfToken: string | null = null
@@ -107,6 +107,17 @@ export const getOverview = () => api.get<Overview>('/overview')
 export const getCameras = () => api.get<Camera[]>('/cameras')
 export const getCamera = (id: string) => api.get<Camera>(`/cameras/${encodeURIComponent(id)}`)
 export const getCameraHealth = (id: string) => api.get<any>(`/cameras/${encodeURIComponent(id)}/health`)
+export const getLatestFrame = (id: string) => api.get<LatestFrame>(`/cameras/${encodeURIComponent(id)}/latest-frame`)
+export const removeCameraSource = (id: string) => api.delete(`/cameras/${encodeURIComponent(id)}/source`)
+export const getAuditLogs = (values: { action?: string; target_type?: string; target_id?: string; camera_id?: string; request_id?: string; from?: string; to?: string; limit?: number; cursor?: string } = {}) =>
+  api.getEnvelope<AuditLog[]>(`/audit-logs?${query(values)}`)
+export const getBackups = () => api.get<BackupInfo[]>('/backups')
+export const getDiagnostics = () => api.get<Array<Record<string, unknown>>>('/diagnostics/events')
+export const runDiagnosticsAction = (action: 'reconnect_camera' | 'retry_job', target_id: string) => api.post('/diagnostics/actions', { action, target_id })
+export const createBackup = (include_images: boolean) => api.post<BackupInfo>('/backups', { include_images })
+export const verifyBackup = (name: string) => api.post<BackupInfo & Record<string, unknown>>('/backups/verify', { name })
+export const previewBackupCleanup = (older_than_days = 30) => api.post<{ older_than_days: number; items: BackupInfo[]; total_bytes: number }>(`/backups/cleanup-preview?older_than_days=${older_than_days}`)
+export const cleanupBackups = (names: string[]) => api.post<{ deleted: string[]; bytes_freed: number }>('/backups/cleanup', { names })
 
 export const timelinePath = (values: { camera_id?: string; from: string; to: string; include_observations?: boolean; limit?: number; cursor?: string }) =>
   `/timeline?${query(values)}`

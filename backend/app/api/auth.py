@@ -1,7 +1,7 @@
 """Authentication and session routes."""
 from fastapi import APIRouter,Depends,Request,Response
 from sqlalchemy.orm import Session
-from app.main import get_db
+from app.main import APIError,get_db
 from app.schemas import LoginRequest,PasswordChangeRequest
 from .common import fail,ok,require_session,require_write,audit
 router=APIRouter()
@@ -9,7 +9,13 @@ router=APIRouter()
 def login(payload:LoginRequest,request:Request,response:Response,db:Session=Depends(get_db)):
     origin=request.headers.get("Origin","").rstrip("/")
     if origin and origin not in request.app.state.config.allowed_origins:fail(403,"ORIGIN_DENIED","登录来源不受允许")
-    token,dto=request.app.state.auth.login(db,payload.username,payload.password)
+    try:
+        token,dto=request.app.state.auth.login(db,payload.username,payload.password)
+    except APIError as exc:
+        audit(db,request,"session.login.failed","admin",payload.username,{"result":"failure","error_code":exc.code})
+        db.commit()
+        raise
+    request.state.auth_session={"user_id":payload.username,"username":payload.username}
     response.set_cookie(request.app.state.auth.cookie_name,token,httponly=True,secure=request.app.state.config.secure_cookies,samesite="strict",max_age=request.app.state.config.session_ttl_seconds,path="/")
     audit(db,request,"session.login","admin","admin");db.commit();return {"data":dto}
 @router.get("/session")
@@ -18,8 +24,11 @@ def get_session(request:Request,session=Depends(require_session)):
     return {"data":request.app.state.auth.session_dto(session)}
 @router.delete("/session")
 def logout(request:Request,response:Response,db:Session=Depends(get_db),_=Depends(require_write)):
+    audit(db,request,"session.logout","admin",request.state.auth_session.get("user_id"),{"result":"success"})
     request.app.state.auth.logout(db,request.state.auth_session);response.delete_cookie(request.app.state.auth.cookie_name,path="/");return ok({"logged_out":True})
 @router.post("/session/password")
 def password(payload:PasswordChangeRequest,request:Request,db:Session=Depends(get_db),_=Depends(require_write)):
     request.app.state.auth.change_password(db,request.state.auth_session,payload.current_password,payload.new_password)
+    audit(db,request,"session.password.change","admin",request.state.auth_session.get("user_id"),{"result":"success"})
+    db.commit()
     return ok({"changed":True})

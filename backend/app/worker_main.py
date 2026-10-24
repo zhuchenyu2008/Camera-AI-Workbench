@@ -35,8 +35,42 @@ from .timeutils import window_for
 from .retention import RetentionPolicy as RetentionConfig, RetentionService, SafeFileDeleter, SqlAlchemyRetentionRepository
 from .detection import DetectorConfig, SignalDetector, ChangeEventStateMachine, EventState
 from .worker_tools import OrmL2ToolService
+from .runtime_state import publish_runtime_event, write_heartbeat
 
 LOG = logging.getLogger("camera_ai_workbench.worker")
+_last_frame_event_at: dict[str, int] = {}
+
+
+def _heartbeat(service: str, *, status: str = "running", metrics: dict[str, Any] | None = None) -> None:
+    try:
+        write_heartbeat(service, status=status, metrics=metrics)
+    except Exception:
+        LOG.warning("heartbeat_write_failed service=%s", service, exc_info=True)
+
+
+def _publish_frame_latest(camera_id: str, frame_id: str, captured_at_ms: int, width: int | None, height: int | None) -> None:
+    # A fast camera must not turn every browser connection into a notification
+    # storm. The persisted frame remains available even when this event is coalesced.
+    now = utc_now_ms()
+    if now - _last_frame_event_at.get(camera_id, 0) < 500:
+        return
+    _last_frame_event_at[camera_id] = now
+    try:
+        settings = _settings()
+        publish_runtime_event(settings.db_url, "frame.latest", {
+            "camera_id": camera_id, "frame_id": frame_id, "captured_at": iso_runtime(captured_at_ms),
+            "thumbnail_url": f"/api/v1/frames/{frame_id}/thumbnail",
+            "content_url": f"/api/v1/frames/{frame_id}/content", "width": width, "height": height,
+        }, camera_id=camera_id)
+    except Exception:
+        LOG.warning("frame_event_publish_failed camera_id=%s", camera_id, exc_info=True)
+
+
+def iso_runtime(value: int | None) -> str | None:
+    if value is None:
+        return None
+    from datetime import UTC, datetime
+    return datetime.fromtimestamp(value / 1000, UTC).isoformat().replace("+00:00", "Z")
 
 
 def _settings():
@@ -566,6 +600,7 @@ async def run_worker() -> None:
                 LOG.exception("worker_iteration_failed")
                 return None
     while not stop.is_set():
+        _heartbeat("worker", metrics={"concurrency": concurrency})
         results = await asyncio.gather(*(task(i) for i in range(concurrency)))
         if not any(results):
             try: await asyncio.wait_for(stop.wait(), 2.0)
@@ -914,9 +949,13 @@ async def run_scheduler() -> None:
         except (NotImplementedError,RuntimeError):pass
     while not stop.is_set():
         try:
+            _heartbeat("scheduler")
             schedule_once()
             retention_once()
-        except Exception: LOG.exception("scheduler_iteration_failed")
+            _heartbeat("scheduler", metrics={"last_success_at_ms": utc_now_ms()})
+        except Exception:
+            _heartbeat("scheduler", status="degraded", metrics={"last_error_at_ms": utc_now_ms()})
+            LOG.exception("scheduler_iteration_failed")
         try: await asyncio.wait_for(stop.wait(),10)
         except asyncio.TimeoutError: pass
 
@@ -941,6 +980,8 @@ async def run_capture() -> None:
             finally:
                 db.close()
 
+            _heartbeat("capture", metrics={"enabled_camera_count": len(enabled_ids)})
+
             for camera_id in enabled_ids:
                 task = tasks.get(camera_id)
                 if task is None or task.done():
@@ -955,6 +996,7 @@ async def run_capture() -> None:
             except asyncio.TimeoutError:
                 pass
     finally:
+        _heartbeat("capture", status="stopped")
         for task in tasks.values():
             task.cancel()
         await asyncio.gather(*tasks.values(), return_exceptions=True)
@@ -1087,6 +1129,8 @@ async def _capture_camera(camera_id: str, data_dir: Path, stop: asyncio.Event | 
                 event_record = active_event or closed_event
                 event_id = event_record.event_id if event_record is not None else None
                 sequence += 1
+                persisted = False
+                status_changed = False
                 db = factory()
                 try:
                     camera_row = db.get(Camera, camera_id)
@@ -1116,6 +1160,7 @@ async def _capture_camera(camera_id: str, data_dir: Path, stop: asyncio.Event | 
                     blob = db.get(FrameBlob, blob_key)
                     if blob is None:
                         db.add(FrameBlob(sha256=blob_key, relative_path=rel, byte_size=result.byte_size))
+                    status_changed = camera_row.status != "online"
                     db.add(row)
                     camera_row.status = "online"
                     camera_row.last_frame_at_ms = result.captured_at_ms
@@ -1152,11 +1197,23 @@ async def _capture_camera(camera_id: str, data_dir: Path, stop: asyncio.Event | 
                         ).values(event_id=event_record.event_id))
 
                     db.commit()
+                    persisted = True
                 except Exception:
                     db.rollback()
                     LOG.exception("frame_persist_failed camera_id=%s", camera_id)
                 finally:
                     db.close()
+
+                if persisted:
+                    _publish_frame_latest(camera_id, result.frame_id, result.captured_at_ms, result.width, result.height)
+                    if status_changed:
+                        try:
+                            settings=_settings()
+                            publish_runtime_event(settings.db_url,"camera.status",{
+                                "camera_id":camera_id,"status":"online","last_frame_at":iso_runtime(result.captured_at_ms)
+                            },camera_id=camera_id)
+                        except Exception:
+                            LOG.warning("camera_status_event_publish_failed camera_id=%s",camera_id,exc_info=True)
 
                 if closed_event is not None:
                     LOG.info("change_event_closed camera_id=%s event_id=%s", camera_id, closed_event.event_id)
@@ -1221,17 +1278,28 @@ async def _wait_or_stop(stop: asyncio.Event, seconds: float) -> None:
 
 def _mark_camera(camera_id: str, status: str, last_frame: int | None):
     db=get_session_factory()()
+    changed=False
+    payload:dict[str,Any]|None=None
     try:
         camera=db.get(Camera,camera_id)
         if camera is not None:
+            changed=camera.status!=status or (last_frame is not None and camera.last_frame_at_ms!=last_frame)
             camera.status=status
             if last_frame is not None:camera.last_frame_at_ms=last_frame
             camera.updated_at_ms=utc_now_ms()
             db.commit()
+            if changed:
+                payload={"camera_id":camera_id,"status":status,"last_frame_at":iso_runtime(camera.last_frame_at_ms)}
     except Exception:
         db.rollback();LOG.exception("camera_status_update_failed camera_id=%s",camera_id)
     finally:
         db.close()
+    if changed and payload is not None:
+        try:
+            settings=_settings()
+            publish_runtime_event(settings.db_url,"camera.status",payload,camera_id=camera_id)
+        except Exception:
+            LOG.warning("camera_status_event_publish_failed camera_id=%s",camera_id,exc_info=True)
 
 
 def retention_once(now_ms: int | None = None) -> dict[str, int]:

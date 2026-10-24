@@ -72,6 +72,7 @@ function SessionGate({ children }: { children: ReactNode }) {
       if (name === 'camera.status' || name === 'frame.latest') {
         void queryClient.invalidateQueries({ queryKey: ['overview'] })
         void queryClient.invalidateQueries({ queryKey: ['cameras'] })
+        void queryClient.invalidateQueries({ queryKey: ['camera-latest-frame'] })
       }
       if (name === 'job.updated') {
         void queryClient.invalidateQueries({ queryKey: ['jobs'] })
@@ -115,6 +116,7 @@ function SessionGate({ children }: { children: ReactNode }) {
           if (connected) return
           void queryClient.invalidateQueries({ queryKey: ['overview'] })
           void queryClient.invalidateQueries({ queryKey: ['cameras'] })
+          void queryClient.invalidateQueries({ queryKey: ['camera-latest-frame'] })
           void queryClient.invalidateQueries({ queryKey: ['timeline'] })
           void queryClient.invalidateQueries({ queryKey: ['jobs'] })
           interval = Math.min(interval * 2, 300_000)

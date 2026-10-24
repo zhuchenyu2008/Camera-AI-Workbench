@@ -60,6 +60,8 @@ class Camera(TimestampMixin, Base):
     frame_height: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(32), default="offline", server_default="offline", nullable=False)
     last_frame_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    # 乐观并发控制：每次配置写入都会递增，API 不再用常量版本号响应。
+    config_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     retention_policy_id: Mapped[str | None] = mapped_column(ForeignKey("retention_policy.id", ondelete="SET NULL"))
     retention_policy: Mapped[RetentionPolicy | None] = relationship(back_populates="cameras")
     frames: Mapped[list[Frame]] = relationship(back_populates="camera", cascade="all, delete-orphan", passive_deletes=True)
@@ -491,6 +493,9 @@ class AuditLog(Base):
     __table_args__ = (Index("ix_audit_log_created_action", "created_at_ms", "action"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     admin_id: Mapped[str | None] = mapped_column(ForeignKey("admin.id", ondelete="SET NULL"))
+    # API 会话使用独立的 auth_users 表；actor_id 保留操作者标识，避免把
+    # 非 ORM 会话 ID 强行写入 admin 外键。
+    actor_id: Mapped[str | None] = mapped_column(String(128))
     action: Mapped[str] = mapped_column(String(120), nullable=False)
     target_type: Mapped[str | None] = mapped_column(String(80))
     target_id: Mapped[str | None] = mapped_column(String(36))
