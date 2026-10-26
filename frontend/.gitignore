@@ -1,9 +1,0 @@
-node_modules
-.DS_Store
-dist
-*.local
-
-# TypeScript project-build output
-*.tsbuildinfo
-/vite.config.js
-/vite.config.d.ts
